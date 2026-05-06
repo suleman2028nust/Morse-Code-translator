@@ -1,0 +1,2384 @@
+Microsoft (R) Macro Assembler Version 6.15.8803		    05/02/26 20:19:30
+main.asm						     Page 1 - 1
+
+
+				; =============================================================================
+				; main.asm - Main Entry Point  |  Morse Code Translator
+				; BIG PREMIUM TERMINAL UI - Restoration v2
+				; =============================================================================
+				INCLUDE Irvine32.inc
+			      C ; Include file for Irvine32.lib             (Irvine32.inc)
+			      C 
+			      C INCLUDE SmallWin.inc		; MS-Windows prototypes, structures, and constants
+			      C .NOLIST
+			      C .LIST
+			      C 
+			      C .NOLIST
+			      C .LIST
+			      C 
+				Beep              PROTO, dwFreq:DWORD, dwDuration:DWORD
+				CreateThread      PROTO, lpAttr:DWORD, dwStack:DWORD, lpStart:DWORD, lpParam:DWORD, dwFlags:DWORD, lpId:DWORD
+				WaitForSingleObject PROTO, hHandle:DWORD, dwMs:DWORD
+				CloseHandle       PROTO, hObject:DWORD
+				FreeConsole       PROTO
+				AllocConsole      PROTO
+				GetStdHandle      PROTO, nStdHandle:DWORD
+				FillConsoleOutputAttribute PROTO, hConsoleOutput:DWORD, wAttribute:DWORD, nLength:DWORD, dwWriteCoord:DWORD, lpNumberOfAttrsWritten:DWORD
+				WriteConsoleOutputAttribute PROTO, outHandle:DWORD, pAttribute:PTR WORD, nLength:DWORD, xyCoord:COORD, lpCount:PTR DWORD
+				LoadLibraryA      PROTO, lpLibFileName:DWORD
+				GetProcAddress    PROTO, hModule:DWORD, lpProcName:DWORD
+				
+				; --- Global constants (timing, colours, layout) -----------------------------
+				INCLUDE morse_timing.asm
+			      C ; =============================================================================
+			      C ; morse_timing.asm - Constants, Timing Definitions, and Layout Parameters
+			      C ; =============================================================================
+			      C 
+			      C ; --- Input / Timing Constants -----------------------------------------------
+ = 0000003C		      C MAX_INPUT_LEN   EQU 60                  ; max characters user may type
+			      C 
+ = 00000320		      C DOT_FREQ        EQU 800                 ; Hz for both dot and dash beep
+ = 00000096		      C DOT_DURATION    EQU 150                 ; ms – short beep  (dot)
+ = 00000190		      C DASH_DURATION   EQU 400                 ; ms – long  beep  (dash)
+ = 00000050		      C SYMBOL_DELAY    EQU 80                  ; ms between symbols within one letter
+ = 000000FA		      C LETTER_DELAY    EQU 250                 ; ms between letters
+ = 00000258		      C HIGHLIGHT_DURATION EQU 600             ; ms the colour-flash stays on
+ = 00000000		      C AUDIO_PRE_DELAY EQU 00                  ; ms latency compensation
+			      C 
+			      C ; --- Screen Layout Parameters (BIG UI Edition) ------------------------------
+			      C ; Target terminal width is 80 columns.
+			      C ; BOX_WIDTH include walls. 2 walls + 74 inner = 76 total.
+			      C ; BOX_LEFT=2 ... BOX_RIGHT=77
+ = 00000002		      C BOX_LEFT        EQU 2
+ = 0000004C		      C BOX_WIDTH       EQU 76
+ = 0000004D		      C BOX_RIGHT       EQU 77
+			      C 
+			      C ; Row where Morse-code output is displayed
+ = 00000010		      C MORSE_ROW       EQU 16
+			      C 
+			      C ; --- Colour Attributes ------------------------------------------------------
+ = 00000009		      C COLOR_TITLE     EQU 09h                 ; bright-blue on black
+ = 0000000B		      C COLOR_TITLE_ACC EQU 0Bh                 ; bright-cyan on black
+ = 00000007		      C COLOR_NORMAL    EQU 07h                 ; gray on black
+ = 0000000E		      C COLOR_INPUT     EQU 0Eh                 ; yellow on black
+ = 0000000A		      C COLOR_MORSE     EQU 0Ah                 ; bright-green on black
+ = 00000009		      C COLOR_BORDER    EQU 09h                 ; bright-blue on black
+ = 0000000B		      C COLOR_PROMPT    EQU 0Bh                 ; bright-cyan on black
+ = 0000000C		      C COLOR_ERROR     EQU 0Ch                 ; bright-red on black
+ = 000000E0		      C COLOR_HIGHLIGHT EQU 0E0h              ; black on bright-yellow
+ = 0000000F		      C COLOR_MENU_KEY  EQU 0Fh                 ; bright-white on black
+ = 00000002		      C COLOR_STATUS    EQU 02h                 ; dark-green on black
+ = 00000008		      C COLOR_DIM       EQU 08h                 ; dark-gray on black
+			      C 
+				
+ 00000000			.DATA
+				; --- Double-line box strings (76 chars wide) --------------------------------
+ 00000000 C9			strTopBorder BYTE 0C9h, 74 DUP(0CDh), 0BBh, 0
+	   0000004A [
+	    CD
+	   ] BB 00
+ 0000004D CC			strDivider   BYTE 0CCh, 74 DUP(0CDh), 0B9h, 0
+	   0000004A [
+	    CD
+	   ] B9 00
+ 0000009A C8			strBotBorder BYTE 0C8h, 74 DUP(0CDh), 0BCh, 0
+	   0000004A [
+	    CD
+	   ] BC 00
+ 000000E7 BA 00			strWall      BYTE 0BAh, 0
+				
+				; --- Full-width thin line (78 chars) ----------------------------------------
+ 000000E9  0000004E [		strSectionLine BYTE 78 DUP(0C4h), 0
+	    C4
+	   ] 00
+				
+				; --- Title text -------------------------------------------------------------
+ 00000138 20 20 20 20 20	strTitle1    BYTE "               - . -     M  O  R  S  E      -  .  -                ", 0
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   2D 20 2E 20 2D
+	   20 20 20 20 20
+	   4D 20 20 4F 20
+	   20 52 20 20 53
+	   20 20 45 20 20
+	   20 20 20 20 2D
+	   20 20 2E 20 20
+	   2D 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 00
+ 0000017C 20 20 20 20 20	strTitle2    BYTE "                   C  O  D  E     T  R  A  N  S  L  A  T  O  R                   ", 0
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 43
+	   20 20 4F 20 20
+	   44 20 20 45 20
+	   20 20 20 20 54
+	   20 20 52 20 20
+	   41 20 20 4E 20
+	   20 53 20 20 4C
+	   20 20 41 20 20
+	   54 20 20 4F 20
+	   20 52 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 00
+				
+				; --- Main-menu items --------------------------------------------------------
+ 000001CE 20 20 20 20 20	strMenu1     BYTE "       [ 1 ]   TEXT  TO  MORSE  ENCODING   (VISUAL MODE)              ", 0
+	   20 20 5B 20 31
+	   20 5D 20 20 20
+	   54 45 58 54 20
+	   20 54 4F 20 20
+	   4D 4F 52 53 45
+	   20 20 45 4E 43
+	   4F 44 49 4E 47
+	   20 20 20 28 56
+	   49 53 55 41 4C
+	   20 4D 4F 44 45
+	   29 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   00
+ 00000215 20 20 20 20 20	strMenu2     BYTE "       [ 2 ]   TEXT  TO  MORSE  ENCODING   (SOUND / AUDIO)            ", 0
+	   20 20 5B 20 32
+	   20 5D 20 20 20
+	   54 45 58 54 20
+	   20 54 4F 20 20
+	   4D 4F 52 53 45
+	   20 20 45 4E 43
+	   4F 44 49 4E 47
+	   20 20 20 28 53
+	   4F 55 4E 44 20
+	   2F 20 41 55 44
+	   49 4F 29 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   00
+ 0000025C 20 20 20 20 20	strMenuDecode BYTE "       [ 3 ]   MORSE  TO  TEXT  DECODING   (TRANSLATION)              ", 0
+	   20 20 5B 20 33
+	   20 5D 20 20 20
+	   4D 4F 52 53 45
+	   20 20 54 4F 20
+	   20 54 45 58 54
+	   20 20 44 45 43
+	   4F 44 49 4E 47
+	   20 20 20 28 54
+	   52 41 4E 53 4C
+	   41 54 49 4F 4E
+	   29 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   00
+ 000002A3 20 20 20 20 20	strMenuBlink BYTE "       [ 4 ]   MORSE  CODE  VISUAL  BLINK  (FLASH MODE)                ", 0
+	   20 20 5B 20 34
+	   20 5D 20 20 20
+	   4D 4F 52 53 45
+	   20 20 43 4F 44
+	   45 20 20 56 49
+	   53 55 41 4C 20
+	   20 42 4C 49 4E
+	   4B 20 20 28 46
+	   4C 41 53 48 20
+	   4D 4F 44 45 29
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 00
+ 000002EB 20 20 20 20 20	strMenuExit  BYTE "       [ 5 ]   EXIT  PROGRAM                                          ", 0
+	   20 20 5B 20 35
+	   20 5D 20 20 20
+	   45 58 49 54 20
+	   20 50 52 4F 47
+	   52 41 4D 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   00
+				
+				; --- Prompt / status --------------------------------------------------------
+ 00000332 20 20 20 20 20	strMenuPrompt BYTE "       SELECT OPTION  [ 1 - 5 ] :  ", 0
+	   20 20 53 45 4C
+	   45 43 54 20 4F
+	   50 54 49 4F 4E
+	   20 20 5B 20 31
+	   20 2D 20 35 20
+	   5D 20 3A 20 20
+	   00
+ 00000356 20 20 3E 3E 20	strInvalid    BYTE "  >> INVALID KEY. PLEASE USE 1-5.", 0
+	   49 4E 56 41 4C
+	   49 44 20 4B 45
+	   59 2E 20 50 4C
+	   45 41 53 45 20
+	   55 53 45 20 31
+	   2D 35 2E 00
+				
+				; --- Shared sub-screen labels -----------------------------------------------
+ 00000378 20 20 20 45 4E	strEnterText  BYTE "   ENTER TEXT   :  ", 0
+	   54 45 52 20 54
+	   45 58 54 20 20
+	   20 3A 20 20 00
+ 0000038C 20 20 20 4D 4F	strYourMorse  BYTE "   MORSE CODE   :  ", 0
+	   52 53 45 20 43
+	   4F 44 45 20 20
+	   20 3A 20 20 00
+ 000003A0 20 20 20 53 54	strPlayingLabel BYTE "   STATUS       :  PLAYING TRANSMISSION ...", 0
+	   41 54 55 53 20
+	   20 20 20 20 20
+	   20 3A 20 20 50
+	   4C 41 59 49 4E
+	   47 20 54 52 41
+	   4E 53 4D 49 53
+	   53 49 4F 4E 20
+	   2E 2E 2E 00
+ 000003CC 20 20 20 45 4E	strEnterMorse BYTE "   ENTER MORSE  :  ", 0
+	   54 45 52 20 4D
+	   4F 52 53 45 20
+	   20 3A 20 20 00
+ 000003E0 20 20 20 44 45	strYourText   BYTE "   DECODED TEXT :  ", 0
+	   43 4F 44 45 44
+	   20 54 45 58 54
+	   20 3A 20 20 00
+ 000003F4 20 20 20 50 52	strPressAny   BYTE "   PRESS ANY KEY TO RETURN TO MENU ...", 0
+	   45 53 53 20 41
+	   4E 59 20 4B 45
+	   59 20 54 4F 20
+	   52 45 54 55 52
+	   4E 20 54 4F 20
+	   4D 45 4E 55 20
+	   2E 2E 2E 00
+ 0000041B 20 20 20 5B 53	strInvalidChar BYTE "   [SKIPPING INVALID CHARACTER]", 0
+	   4B 49 50 50 49
+	   4E 47 20 49 4E
+	   56 41 4C 49 44
+	   20 43 48 41 52
+	   41 43 54 45 52
+	   5D 00
+ 0000043B 20 20 3E 3E 20	strNoInput    BYTE "  >> ERROR: NO DATA PROVIDED. PLEASE ENTER A VALID SEQUENCE.", 0
+	   45 52 52 4F 52
+	   3A 20 4E 4F 20
+	   44 41 54 41 20
+	   50 52 4F 56 49
+	   44 45 44 2E 20
+	   50 4C 45 41 53
+	   45 20 45 4E 54
+	   45 52 20 41 20
+	   56 41 4C 49 44
+	   20 53 45 51 55
+	   45 4E 43 45 2E
+	   00
+ 00000478 20 20 3E 3E 20	strEmptyMorse BYTE "  >> ERROR: NO DATA PROVIDED. PLEASE ENTER A VALID SEQUENCE.", 0
+	   45 52 52 4F 52
+	   3A 20 4E 4F 20
+	   44 41 54 41 20
+	   50 52 4F 56 49
+	   44 45 44 2E 20
+	   50 4C 45 41 53
+	   45 20 45 4E 54
+	   45 52 20 41 20
+	   56 41 4C 49 44
+	   20 53 45 51 55
+	   45 4E 43 45 2E
+	   00
+ 000004B5 20 20 3E 3E 20	strHandleErr  BYTE "  >> CRITICAL ERROR: CONSOLE HANDLE ACQUISITION FAILED.", 0
+	   43 52 49 54 49
+	   43 41 4C 20 45
+	   52 52 4F 52 3A
+	   20 43 4F 4E 53
+	   4F 4C 45 20 48
+	   41 4E 44 4C 45
+	   20 41 43 51 55
+	   49 53 49 54 49
+	   4F 4E 20 46 41
+	   49 4C 45 44 2E
+	   00
+ 000004ED 20 20 3E 3E 20	strTextNotMorse BYTE "  >> FORMAT ERROR: EXPECTED TEXT (A-Z, 0-9), BUT DETECTED MORSE CODE.", 0
+	   46 4F 52 4D 41
+	   54 20 45 52 52
+	   4F 52 3A 20 45
+	   58 50 45 43 54
+	   45 44 20 54 45
+	   58 54 20 28 41
+	   2D 5A 2C 20 30
+	   2D 39 29 2C 20
+	   42 55 54 20 44
+	   45 54 45 43 54
+	   45 44 20 4D 4F
+	   52 53 45 20 43
+	   4F 44 45 2E 00
+ 00000533 20 20 3E 3E 20	strMorseNotText BYTE "  >> FORMAT ERROR: EXPECTED MORSE CODE (., -, /), BUT DETECTED TEXT.", 0
+	   46 4F 52 4D 41
+	   54 20 45 52 52
+	   4F 52 3A 20 45
+	   58 50 45 43 54
+	   45 44 20 4D 4F
+	   52 53 45 20 43
+	   4F 44 45 20 28
+	   2E 2C 20 2D 2C
+	   20 2F 29 2C 20
+	   42 55 54 20 44
+	   45 54 45 43 54
+	   45 44 20 54 45
+	   58 54 2E 00
+ 00000578 20 20 20 20 20	strBlankLine  BYTE "                                                            ", 0
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   00
+				
+				; --- Morse table ------------------------------------------------------------
+				INCLUDE morse_table.asm
+			      C ; =============================================================================
+			      C ; morse_table.asm - Morse Code Lookup Table
+			      C ; =============================================================================
+			      C 
+			      C ; --- Morse string constants -------------------------------------------------
+ 000005B5 20 00		      C strSpace        BYTE " ", 0
+ 000005B7 2E 00		      C strDot          BYTE ".", 0
+ 000005B9 2D 00		      C strDash         BYTE "-", 0
+ 000005BB 20 00		      C strLetterGap    BYTE " ", 0           
+ 000005BD 20 2F 20 00	      C strWordSep      BYTE " / ", 0         
+			      C 
+ 000005C1 2E 2D 00	      C MorseA  BYTE ".-",   0
+ 000005C4 2D 2E 2E 2E 00      C MorseB  BYTE "-...", 0
+ 000005C9 2D 2E 2D 2E 00      C MorseC  BYTE "-.-.", 0
+ 000005CE 2D 2E 2E 00	      C MorseD  BYTE "-..",  0
+ 000005D2 2E 00		      C MorseE  BYTE ".",    0
+ 000005D4 2E 2E 2D 2E 00      C MorseF  BYTE "..-.", 0
+ 000005D9 2D 2D 2E 00	      C MorseG  BYTE "--.",  0
+ 000005DD 2E 2E 2E 2E 00      C MorseH  BYTE "....", 0
+ 000005E2 2E 2E 00	      C MorseI  BYTE "..",   0
+ 000005E5 2E 2D 2D 2D 00      C MorseJ  BYTE ".---", 0
+ 000005EA 2D 2E 2D 00	      C MorseK  BYTE "-.-",  0
+ 000005EE 2E 2D 2E 2E 00      C MorseL  BYTE ".-..", 0
+ 000005F3 2D 2D 00	      C MorseM  BYTE "--",   0
+ 000005F6 2D 2E 00	      C MorseN  BYTE "-.",   0
+ 000005F9 2D 2D 2D 00	      C MorseO  BYTE "---",  0
+ 000005FD 2E 2D 2D 2E 00      C MorseP  BYTE ".--.", 0
+ 00000602 2D 2D 2E 2D 00      C MorseQ  BYTE "--.-", 0
+ 00000607 2E 2D 2E 00	      C MorseR  BYTE ".-.",  0
+ 0000060B 2E 2E 2E 00	      C MorseS  BYTE "...",  0
+ 0000060F 2D 00		      C MorseT  BYTE "-",    0
+ 00000611 2E 2E 2D 00	      C MorseU  BYTE "..-",  0
+ 00000615 2E 2E 2E 2D 00      C MorseV  BYTE "...-", 0
+ 0000061A 2E 2D 2D 00	      C MorseW  BYTE ".--",  0
+ 0000061E 2D 2E 2E 2D 00      C MorseX  BYTE "-..-", 0
+ 00000623 2D 2E 2D 2D 00      C MorseY  BYTE "-.--", 0
+ 00000628 2D 2D 2E 2E 00      C MorseZ  BYTE "--..", 0
+			      C 
+ 0000062D 2D 2D 2D 2D 2D      C Morse0  BYTE "-----", 0
+	   00
+ 00000633 2E 2D 2D 2D 2D      C Morse1  BYTE ".----", 0
+	   00
+ 00000639 2E 2E 2D 2D 2D      C Morse2  BYTE "..---", 0
+	   00
+ 0000063F 2E 2E 2E 2D 2D      C Morse3  BYTE "...--", 0
+	   00
+ 00000645 2E 2E 2E 2E 2D      C Morse4  BYTE "....-", 0
+	   00
+ 0000064B 2E 2E 2E 2E 2E      C Morse5  BYTE ".....", 0
+	   00
+ 00000651 2D 2E 2E 2E 2E      C Morse6  BYTE "-....", 0
+	   00
+ 00000657 2D 2D 2E 2E 2E      C Morse7  BYTE "--...", 0
+	   00
+ 0000065D 2D 2D 2D 2E 2E      C Morse8  BYTE "---..", 0
+	   00
+ 00000663 2D 2D 2D 2D 2E      C Morse9  BYTE "----.", 0
+	   00
+			      C 
+			      C ; Pointer table – 26 letters (A=0 … Z=25)
+			      C ;[
+			      C ; MorseA is stored at → 00401000
+			      C ;which is a 32 bit no
+			      C ;]
+			      C 
+ 00000669 000005C1 R	      C MorseTableAlpha DWORD OFFSET MorseA, OFFSET MorseB, OFFSET MorseC
+	   000005C4 R
+	   000005C9 R
+ 00000675  000005CE R	      C                 DWORD OFFSET MorseD, OFFSET MorseE, OFFSET MorseF
+	   000005D2 R
+	   000005D4 R
+ 00000681  000005D9 R	      C                 DWORD OFFSET MorseG, OFFSET MorseH, OFFSET MorseI
+	   000005DD R
+	   000005E2 R
+ 0000068D  000005E5 R	      C                 DWORD OFFSET MorseJ, OFFSET MorseK, OFFSET MorseL
+	   000005EA R
+	   000005EE R
+ 00000699  000005F3 R	      C                 DWORD OFFSET MorseM, OFFSET MorseN, OFFSET MorseO
+	   000005F6 R
+	   000005F9 R
+ 000006A5  000005FD R	      C                 DWORD OFFSET MorseP, OFFSET MorseQ, OFFSET MorseR
+	   00000602 R
+	   00000607 R
+ 000006B1  0000060B R	      C                 DWORD OFFSET MorseS, OFFSET MorseT, OFFSET MorseU
+	   0000060F R
+	   00000611 R
+ 000006BD  00000615 R	      C                 DWORD OFFSET MorseV, OFFSET MorseW, OFFSET MorseX
+	   0000061A R
+	   0000061E R
+ 000006C9  00000623 R	      C                 DWORD OFFSET MorseY, OFFSET MorseZ
+	   00000628 R
+			      C 
+			      C ; Pointer table – 10 digits (0=0 … 9=9)
+ 000006D1 0000062D R	      C MorseTableDigit DWORD OFFSET Morse0, OFFSET Morse1, OFFSET Morse2
+	   00000633 R
+	   00000639 R
+ 000006DD  0000063F R	      C                 DWORD OFFSET Morse3, OFFSET Morse4, OFFSET Morse5
+	   00000645 R
+	   0000064B R
+ 000006E9  00000651 R	      C                 DWORD OFFSET Morse6, OFFSET Morse7, OFFSET Morse8
+	   00000657 R
+	   0000065D R
+ 000006F5  00000663 R	      C                 DWORD OFFSET Morse9
+			      C 
+				
+ 00000000			.DATA?
+ 00000000  0000003D [		inputBuffer   BYTE MAX_INPUT_LEN+1 DUP(?)
+	    00
+	   ]
+ 0000003D 00000000		inputLen      DWORD ?
+				
+ 00000000			.CODE
+				
+				; =============================================================================
+				; Shared UI procedures
+				; =============================================================================
+				
+ 00000000			PrintWall PROC
+ 00000000  50			    push eax
+ 00000001  52			    push edx
+ 00000002  B0 09		    mov  al, COLOR_BORDER
+ 00000004  E8 00000000 E	    call SetTextColor
+ 00000009  BA 000000E7 R	    mov  edx, OFFSET strWall
+ 0000000E  E8 00000000 E	    call WriteString
+ 00000013  5A			    pop  edx
+ 00000014  58			    pop  eax
+ 00000015  C3			    ret
+ 00000016			PrintWall ENDP
+				
+ 00000016			PrintRightWall PROC
+ 00000016  50			    push eax
+ 00000017  52			    push edx
+ 00000018  B2 4D		    mov  dl, BOX_RIGHT
+ 0000001A  E8 00000000 E	    call Gotoxy
+ 0000001F  B0 09		    mov  al, COLOR_BORDER
+ 00000021  E8 00000000 E	    call SetTextColor
+ 00000026  BA 000000E7 R	    mov  edx, OFFSET strWall
+ 0000002B  E8 00000000 E	    call WriteString
+ 00000030  5A			    pop  edx
+ 00000031  58			    pop  eax
+ 00000032  C3			    ret
+ 00000033			PrintRightWall ENDP
+				
+ 00000033			PrintTopBorder PROC
+ 00000033  B2 02		    mov  dl, BOX_LEFT
+ 00000035  E8 00000000 E	    call Gotoxy
+ 0000003A  B0 09		    mov  al, COLOR_BORDER
+ 0000003C  E8 00000000 E	    call SetTextColor
+ 00000041  BA 00000000 R	    mov  edx, OFFSET strTopBorder
+ 00000046  E8 00000000 E	    call WriteString
+ 0000004B  C3			    ret
+ 0000004C			PrintTopBorder ENDP
+				
+ 0000004C			PrintDivider PROC
+ 0000004C  B2 02		    mov  dl, BOX_LEFT
+ 0000004E  E8 00000000 E	    call Gotoxy
+ 00000053  B0 09		    mov  al, COLOR_BORDER
+ 00000055  E8 00000000 E	    call SetTextColor
+ 0000005A  BA 0000004D R	    mov  edx, OFFSET strDivider
+ 0000005F  E8 00000000 E	    call WriteString
+ 00000064  C3			    ret
+ 00000065			PrintDivider ENDP
+				
+ 00000065			PrintBotBorder PROC
+ 00000065  B2 02		    mov  dl, BOX_LEFT
+ 00000067  E8 00000000 E	    call Gotoxy
+ 0000006C  B0 09		    mov  al, COLOR_BORDER
+ 0000006E  E8 00000000 E	    call SetTextColor
+ 00000073  BA 0000009A R	    mov  edx, OFFSET strBotBorder
+ 00000078  E8 00000000 E	    call WriteString
+ 0000007D  C3			    ret
+ 0000007E			PrintBotBorder ENDP
+				
+ 0000007E			PrintSectionLine PROC
+ 0000007E  B2 00		    mov  dl, 0
+ 00000080  E8 00000000 E	    call Gotoxy
+ 00000085  B0 09		    mov  al, COLOR_BORDER
+ 00000087  E8 00000000 E	    call SetTextColor
+ 0000008C  BA 000000E9 R	    mov  edx, OFFSET strSectionLine
+ 00000091  E8 00000000 E	    call WriteString
+ 00000096  C3			    ret
+ 00000097			PrintSectionLine ENDP
+				
+ 00000097			DrawTitleBar PROC
+ 00000097  B0 07		    mov  al, COLOR_NORMAL
+ 00000099  E8 00000000 E	    call SetTextColor
+ 0000009E  E8 00000000 E	    call Clrscr
+ 000000A3  B6 01		    mov  dh, 1
+ 000000A5  E8 FFFFFF89		    call PrintTopBorder
+ 000000AA  B6 02		    mov  dh, 2
+ 000000AC  B2 02		    mov  dl, BOX_LEFT
+ 000000AE  E8 00000000 E	    call Gotoxy
+ 000000B3  E8 FFFFFF48		    call PrintWall
+ 000000B8  B0 09		    mov  al, COLOR_TITLE
+ 000000BA  E8 00000000 E	    call SetTextColor
+ 000000BF  BA 00000138 R	    mov  edx, OFFSET strTitle1
+ 000000C4  E8 00000000 E	    call WriteString
+ 000000C9  B6 02		    mov  dh, 2
+ 000000CB  E8 FFFFFF46		    call PrintRightWall
+ 000000D0  B6 03		    mov  dh, 3
+ 000000D2  B2 02		    mov  dl, BOX_LEFT
+ 000000D4  E8 00000000 E	    call Gotoxy
+ 000000D9  E8 FFFFFF22		    call PrintWall
+ 000000DE  B0 0B		    mov  al, COLOR_TITLE_ACC
+ 000000E0  E8 00000000 E	    call SetTextColor
+ 000000E5  BA 0000017C R	    mov  edx, OFFSET strTitle2
+ 000000EA  E8 00000000 E	    call WriteString
+ 000000EF  B6 03		    mov  dh, 3
+ 000000F1  E8 FFFFFF20		    call PrintRightWall
+ 000000F6  B6 04		    mov  dh, 4
+ 000000F8  E8 FFFFFF4F		    call PrintDivider
+ 000000FD  C3			    ret
+ 000000FE			DrawTitleBar ENDP
+				
+ 000000FE			DrawSubHeader PROC pMode:DWORD
+ 00000101  B6 05		    mov  dh, 5
+ 00000103  B2 02		    mov  dl, BOX_LEFT
+ 00000105  E8 00000000 E	    call Gotoxy
+ 0000010A  E8 FFFFFEF1		    call PrintWall
+ 0000010F  B0 0B		    mov  al, COLOR_PROMPT
+ 00000111  E8 00000000 E	    call SetTextColor
+ 00000116  8B 55 08		    mov  edx, pMode
+ 00000119  E8 00000000 E	    call WriteString
+ 0000011E  B6 05		    mov  dh, 5
+ 00000120  E8 FFFFFEF1		    call PrintRightWall
+ 00000125  B6 06		    mov  dh, 6
+ 00000127  E8 FFFFFF39		    call PrintBotBorder
+				    ret
+ 00000130			DrawSubHeader ENDP
+				
+ 00000130			DrawMainMenu PROC
+ 00000130  E8 00000108		    call ClearLowerDisplay
+ 00000135  E8 FFFFFF5D		    call DrawTitleBar
+ 0000013A  B6 05		    mov  dh, 5
+ 0000013C  E8 FFFFFEF2		    call PrintTopBorder
+ 00000141  B6 06		    mov  dh, 6
+ 00000143  B2 02		    mov  dl, BOX_LEFT
+ 00000145  E8 00000000 E	    call Gotoxy
+ 0000014A  E8 FFFFFEB1		    call PrintWall
+ 0000014F  B0 0E		    mov  al, COLOR_INPUT
+ 00000151  E8 00000000 E	    call SetTextColor
+ 00000156  BA 000001CE R	    mov  edx, OFFSET strMenu1
+ 0000015B  E8 00000000 E	    call WriteString
+ 00000160  B6 06		    mov  dh, 6
+ 00000162  E8 FFFFFEAF		    call PrintRightWall
+ 00000167  B6 07		    mov  dh, 7
+ 00000169  B2 02		    mov  dl, BOX_LEFT
+ 0000016B  E8 00000000 E	    call Gotoxy
+ 00000170  E8 FFFFFE8B		    call PrintWall
+ 00000175  B0 0E		    mov  al, COLOR_INPUT
+ 00000177  E8 00000000 E	    call SetTextColor
+ 0000017C  BA 00000215 R	    mov  edx, OFFSET strMenu2
+ 00000181  E8 00000000 E	    call WriteString
+ 00000186  B6 07		    mov  dh, 7
+ 00000188  E8 FFFFFE89		    call PrintRightWall
+ 0000018D  B6 08		    mov  dh, 8
+ 0000018F  B2 02		    mov  dl, BOX_LEFT
+ 00000191  E8 00000000 E	    call Gotoxy
+ 00000196  E8 FFFFFE65		    call PrintWall
+ 0000019B  B0 0E		    mov  al, COLOR_INPUT
+ 0000019D  E8 00000000 E	    call SetTextColor
+ 000001A2  BA 0000025C R	    mov  edx, OFFSET strMenuDecode
+ 000001A7  E8 00000000 E	    call WriteString
+ 000001AC  B6 08		    mov  dh, 8
+ 000001AE  E8 FFFFFE63		    call PrintRightWall
+ 000001B3  B6 09		    mov  dh, 9
+ 000001B5  B2 02		    mov  dl, BOX_LEFT
+ 000001B7  E8 00000000 E	    call Gotoxy
+ 000001BC  E8 FFFFFE3F		    call PrintWall
+ 000001C1  B0 0E		    mov  al, COLOR_INPUT
+ 000001C3  E8 00000000 E	    call SetTextColor
+ 000001C8  BA 000002A3 R	    mov  edx, OFFSET strMenuBlink
+ 000001CD  E8 00000000 E	    call WriteString
+ 000001D2  B6 09		    mov  dh, 9
+ 000001D4  E8 FFFFFE3D		    call PrintRightWall
+ 000001D9  B6 0A		    mov  dh, 10
+ 000001DB  B2 02		    mov  dl, BOX_LEFT
+ 000001DD  E8 00000000 E	    call Gotoxy
+ 000001E2  E8 FFFFFE19		    call PrintWall
+ 000001E7  B0 0C		    mov  al, COLOR_ERROR
+ 000001E9  E8 00000000 E	    call SetTextColor
+ 000001EE  BA 000002EB R	    mov  edx, OFFSET strMenuExit
+ 000001F3  E8 00000000 E	    call WriteString
+ 000001F8  B6 0A		    mov  dh, 10
+ 000001FA  E8 FFFFFE17		    call PrintRightWall
+ 000001FF  B6 0B		    mov  dh, 11
+ 00000201  E8 FFFFFE46		    call PrintDivider
+ 00000206  B6 0C		    mov  dh, 12
+ 00000208  B2 02		    mov  dl, BOX_LEFT
+ 0000020A  E8 00000000 E	    call Gotoxy
+ 0000020F  E8 FFFFFDEC		    call PrintWall
+ 00000214  B0 0B		    mov  al, COLOR_PROMPT
+ 00000216  E8 00000000 E	    call SetTextColor
+ 0000021B  BA 00000332 R	    mov  edx, OFFSET strMenuPrompt
+ 00000220  E8 00000000 E	    call WriteString
+ 00000225  B6 0D		    mov  dh, 13
+ 00000227  E8 FFFFFE39		    call PrintBotBorder
+ 0000022C  B6 0C		    mov  dh, 12
+ 0000022E  B2 28		    mov  dl, 40
+ 00000230  E8 00000000 E	    call Gotoxy
+ 00000235  B0 0E		    mov  al, COLOR_INPUT
+ 00000237  E8 00000000 E	    call SetTextColor
+ 0000023C  C3			    ret
+ 0000023D			DrawMainMenu ENDP
+				
+				; =============================================================================
+				; PROCEDURE: ClearLowerDisplay
+				;   Clears potential ghosting text in rows 14-29
+				; =============================================================================
+ 0000023D			ClearLowerDisplay PROC
+ 0000023D  60			    pushad
+ 0000023E  B0 07		    mov  al, COLOR_NORMAL
+ 00000240  E8 00000000 E	    call SetTextColor
+ 00000245  B6 0E		    mov  dh, 14
+ 00000247			CLD_Loop:
+ 00000247  B2 00		    mov  dl, 0
+ 00000249  E8 00000000 E	    call Gotoxy
+ 0000024E  52			    push edx
+ 0000024F  BA 00000578 R	    mov  edx, OFFSET strBlankLine
+ 00000254  E8 00000000 E	    call WriteString
+ 00000259  E8 00000000 E	    call WriteString  ; 50 + 50 = 100 chars (overflow is fine)
+ 0000025E  5A			    pop  edx
+ 0000025F  FE C6		    inc  dh
+ 00000261  80 FE 1D		    cmp  dh, 29
+ 00000264  7C E1		    jl   CLD_Loop
+ 00000266  61			    popad
+ 00000267  C3			    ret
+ 00000268			ClearLowerDisplay ENDP
+				
+				; =============================================================================
+				; Input Validation Helpers
+				; =============================================================================
+ 00000268			CheckIfMorseInput PROC
+ 00000268  56			    push esi
+ 00000269  51			    push ecx
+ 0000026A  52			    push edx
+ 0000026B  BE 00000000 R	    mov  esi, OFFSET inputBuffer
+ 00000270  8B 0D 0000003D R	    mov  ecx, inputLen
+ 00000276  83 F9 00		    cmp  ecx, 0
+ 00000279  74 23		    je   CMI_False
+ 0000027B  BA 00000000		    mov  edx, 0
+ 00000280			CMI_Loop:
+ 00000280  8A 06		    mov  al, [esi]
+ 00000282  3C 2E		    cmp  al, '.'
+ 00000284  74 0E		    je   CMI_IsMorseChar
+ 00000286  3C 2D		    cmp  al, '-'
+ 00000288  74 0A		    je   CMI_IsMorseChar
+ 0000028A  3C 2F		    cmp  al, '/'
+ 0000028C  74 06		    je   CMI_IsMorseChar
+ 0000028E  3C 20		    cmp  al, ' '
+ 00000290  74 03		    je   CMI_Next
+ 00000292  EB 0A		    jmp  CMI_False
+ 00000294			CMI_IsMorseChar:
+ 00000294  42			    inc  edx
+ 00000295			CMI_Next:
+ 00000295  46			    inc  esi
+ 00000296  49			    dec  ecx
+ 00000297  75 E7		    jnz  CMI_Loop
+ 00000299  83 FA 00		    cmp  edx, 0
+ 0000029C  7F 07		    jg   CMI_True
+ 0000029E			CMI_False:
+ 0000029E  B8 00000000		    mov  eax, 0
+ 000002A3  EB 05		    jmp  CMI_End
+ 000002A5			CMI_True:
+ 000002A5  B8 00000001		    mov  eax, 1
+ 000002AA			CMI_End:
+ 000002AA  5A			    pop  edx
+ 000002AB  59			    pop  ecx
+ 000002AC  5E			    pop  esi
+ 000002AD  C3			    ret
+ 000002AE			CheckIfMorseInput ENDP
+				
+ 000002AE			CheckIfTextInput PROC
+ 000002AE  56			    push esi
+ 000002AF  51			    push ecx
+ 000002B0  52			    push edx
+ 000002B1  BE 00000000 R	    mov  esi, OFFSET inputBuffer
+ 000002B6  8B 0D 0000003D R	    mov  ecx, inputLen
+ 000002BC  83 F9 00		    cmp  ecx, 0
+ 000002BF  74 2D		    je   CTI_False
+ 000002C1  BA 00000000		    mov  edx, 0
+ 000002C6			CTI_Loop:
+ 000002C6  8A 06		    mov  al, [esi]
+ 000002C8  3C 41		    cmp  al, 'A'
+ 000002CA  7C 0E		    jl   CTI_CheckDigit
+ 000002CC  3C 5A		    cmp  al, 'Z'
+ 000002CE  7E 14		    jle  CTI_IsAlphaNum
+ 000002D0  3C 61		    cmp  al, 'a'
+ 000002D2  7C 11		    jl   CTI_Next
+ 000002D4  3C 7A		    cmp  al, 'z'
+ 000002D6  7E 0C		    jle  CTI_IsAlphaNum
+ 000002D8  EB 0B		    jmp  CTI_Next
+ 000002DA			CTI_CheckDigit:
+ 000002DA  3C 30		    cmp  al, '0'
+ 000002DC  7C 07		    jl   CTI_Next
+ 000002DE  3C 39		    cmp  al, '9'
+ 000002E0  7E 02		    jle  CTI_IsAlphaNum
+ 000002E2  EB 01		    jmp  CTI_Next
+ 000002E4			CTI_IsAlphaNum:
+ 000002E4  42			    inc  edx
+ 000002E5			CTI_Next:
+ 000002E5  46			    inc  esi
+ 000002E6  49			    dec  ecx
+ 000002E7  75 DD		    jnz  CTI_Loop
+ 000002E9  83 FA 00		    cmp  edx, 0
+ 000002EC  7F 07		    jg   CTI_True
+ 000002EE			CTI_False:
+ 000002EE  B8 00000000		    mov  eax, 0
+ 000002F3  EB 05		    jmp  CTI_End
+ 000002F5			CTI_True:
+ 000002F5  B8 00000001		    mov  eax, 1
+ 000002FA			CTI_End:
+ 000002FA  5A			    pop  edx
+ 000002FB  59			    pop  ecx
+ 000002FC  5E			    pop  esi
+ 000002FD  C3			    ret
+ 000002FE			CheckIfTextInput ENDP
+				
+				; --- Main Entry Point ---
+ 000002FE			main PROC
+ 000002FE			MenuLoop:
+ 000002FE  E8 FFFFFE2D		    call DrawMainMenu
+ 00000303  E8 00000000 E	    call ReadChar
+ 00000308  3C 31		    cmp  al, '1'
+ 0000030A  74 36		    je   Main_DoVisual
+ 0000030C  3C 32		    cmp  al, '2'
+ 0000030E  74 39		    je   Main_DoSound
+ 00000310  3C 33		    cmp  al, '3'
+ 00000312  74 3C		    je   Main_DoDecode
+ 00000314  3C 34		    cmp  al, '4'
+ 00000316  74 3F		    je   Main_DoBlink
+ 00000318  3C 35		    cmp  al, '5'
+ 0000031A  74 42		    je   Main_ExitProg
+ 0000031C  B6 0F		    mov  dh, 15
+ 0000031E  B2 00		    mov  dl, 0
+ 00000320  E8 00000000 E	    call Gotoxy
+ 00000325  B0 0C		    mov  al, COLOR_ERROR
+ 00000327  E8 00000000 E	    call SetTextColor
+ 0000032C  BA 00000356 R	    mov  edx, OFFSET strInvalid
+ 00000331  E8 00000000 E	    call WriteString
+ 00000336  B8 000003E8		    mov  eax, 1000
+ 0000033B  E8 00000000 E	    call Delay
+ 00000340  EB BC		    jmp  MenuLoop
+ 00000342			Main_DoVisual:
+ 00000342  E8 000003F3		    call DoEncodingVisual
+ 00000347  EB B5		    jmp  MenuLoop
+ 00000349			Main_DoSound:
+ 00000349  E8 00000229		    call DoEncodingSound
+ 0000034E  EB AE		    jmp  MenuLoop
+ 00000350			Main_DoDecode:
+ 00000350  E8 000004E0		    call DoDecoding
+ 00000355  EB A7		    jmp  MenuLoop
+ 00000357			Main_DoBlink:
+ 00000357  E8 0000094B		    call DoEncodingBlink
+ 0000035C  EB A0		    jmp  MenuLoop
+ 0000035E			Main_ExitProg:
+ 0000035E  B0 07		    mov  al, COLOR_NORMAL
+ 00000360  E8 00000000 E	    call SetTextColor
+ 00000365  E8 00000000 E	    call Clrscr
+				    exit
+ 00000371			main ENDP
+				
+				; --- Include sub-modules AFTER procedures to avoid undefined symbols ---
+				INCLUDE morse_to_sound.asm
+			      C ; =============================================================================
+			      C ; morse_to_sound.asm  –  Text → Morse  (Sound / Audio mode)
+			      C ; =============================================================================
+			      C 
+ 000006F9		      C .DATA
+ 000006F9 20 20 20 54 45      C strModeSound BYTE "   TEXT  TO  MORSE  ENCODING   |   SOUND  MODE   ", 0
+	   58 54 20 20 54
+	   4F 20 20 4D 4F
+	   52 53 45 20 20
+	   45 4E 43 4F 44
+	   49 4E 47 20 20
+	   20 7C 20 20 20
+	   53 4F 55 4E 44
+	   20 20 4D 4F 44
+	   45 20 20 20 00
+			      C 
+ 00000041		      C .DATA?
+ 00000041 00000000	      C beepFreq    DWORD ?
+ 00000045 00000000	      C beepDur     DWORD ?
+ 00000049 00000000	      C hBeepThread DWORD ?
+ 0000004D 00000000	      C dwThreadId  DWORD ?
+			      C 
+ 00000371		      C .Code
+			      C 
+ 00000371		      C BeepThreadProc PROC lpParam:DWORD
+			      C     INVOKE Beep, beepFreq, beepDur
+ 00000385  33 C0	      C     xor    eax, eax
+			      C     ret
+ 0000038B		      C BeepThreadProc ENDP
+			      C 
+ 0000038B		      C EncodeSound PROC
+ 0000038B  B0 0A	      C     mov  al, COLOR_MORSE
+ 0000038D  E8 00000000 E      C     call SetTextColor
+ 00000392  B2 00	      C     mov  dl, 0
+ 00000394  B6 10	      C     mov  dh, MORSE_ROW
+ 00000396  E8 00000000 E      C     call Gotoxy
+			      C 
+ 0000039B  BE 00000000 R      C     mov  esi, OFFSET inputBuffer
+ 000003A0  8B 0D 0000003D R   C     mov  ecx, inputLen
+ 000003A6  83 F9 00	      C     cmp  ecx, 0
+ 000003A9  0F 84 000001C7     C     je   ES_End
+			      C 
+ 000003AF		      C ES_C_Outer:
+ 000003AF  8A 06	      C     mov  al, [esi]
+ 000003B1  46		      C     inc  esi
+ 000003B2  3C 61	      C     cmp  al, 'a'
+ 000003B4  7C 06	      C     jl   ES_C_Upper
+ 000003B6  3C 7A	      C     cmp  al, 'z'
+ 000003B8  7F 02	      C     jg   ES_C_Upper
+ 000003BA  2C 20	      C     sub  al, 32
+ 000003BC		      C ES_C_Upper:
+ 000003BC  3C 30	      C     cmp  al, '0'
+ 000003BE  7C 0C	      C     jl   ES_C_NotAlpha
+ 000003C0  3C 39	      C     cmp  al, '9'
+ 000003C2  7E 29	      C     jle  ES_C_Digit
+ 000003C4  3C 41	      C     cmp  al, 'A'
+ 000003C6  7C 04	      C     jl   ES_C_NotAlpha
+ 000003C8  3C 5A	      C     cmp  al, 'Z'
+ 000003CA  7E 12	      C     jle  ES_C_Letter
+			      C 
+ 000003CC		      C ES_C_NotAlpha:
+ 000003CC  3C 20	      C     cmp  al, ' '
+ 000003CE  74 02	      C     je   ES_C_Word
+ 000003D0  EB 46	      C     jmp  ES_C_Next
+ 000003D2		      C ES_C_Word:
+ 000003D2  BA 000005BD R      C     mov  edx, OFFSET strWordSep
+ 000003D7  E8 00000000 E      C     call WriteString
+ 000003DC  EB 3A	      C     jmp  ES_C_Next
+ 000003DE		      C ES_C_Letter:
+ 000003DE  0F B6 F8	      C     movzx edi, al
+ 000003E1  83 EF 41	      C     sub   edi, 'A'
+ 000003E4  8B 14 BD	      C     mov   edx, MorseTableAlpha[edi*4]
+	   00000669 R
+ 000003EB  EB 0D	      C     jmp   ES_C_Syms
+ 000003ED		      C ES_C_Digit:
+ 000003ED  0F B6 F8	      C     movzx edi, al
+ 000003F0  83 EF 30	      C     sub   edi, '0'
+ 000003F3  8B 14 BD	      C     mov   edx, MorseTableDigit[edi*4]
+	   000006D1 R
+ 000003FA		      C ES_C_Syms:
+ 000003FA  51		      C     push  ecx
+ 000003FB  56		      C     push  esi
+ 000003FC  8B F2	      C     mov   esi, edx
+ 000003FE		      C ES_C_Inner:
+ 000003FE  8A 06	      C     mov  al, [esi]
+ 00000400  3C 00	      C     cmp  al, 0
+ 00000402  74 08	      C     je   ES_C_InDone
+ 00000404  E8 00000000 E      C     call WriteChar
+ 00000409  46		      C     inc  esi
+ 0000040A  EB F2	      C     jmp  ES_C_Inner
+ 0000040C		      C ES_C_InDone:
+ 0000040C  BA 000005BB R      C     mov  edx, OFFSET strLetterGap
+ 00000411  E8 00000000 E      C     call WriteString
+ 00000416  5E		      C     pop  esi
+ 00000417  59		      C     pop  ecx
+ 00000418		      C ES_C_Next:
+ 00000418  49		      C     dec  ecx
+ 00000419  75 94	      C     jnz  ES_C_Outer
+			      C 
+ 0000041B  B6 12	      C     mov  dh, 18
+ 0000041D  B2 00	      C     mov  dl, 0
+ 0000041F  E8 00000000 E      C     call Gotoxy
+ 00000424  B0 0B	      C     mov  al, COLOR_PROMPT
+ 00000426  E8 00000000 E      C     call SetTextColor
+ 0000042B  BA 000003A0 R      C     mov  edx, OFFSET strPlayingLabel
+ 00000430  E8 00000000 E      C     call WriteString
+ 00000435  B8 000001F4	      C     mov  eax, 500
+ 0000043A  E8 00000000 E      C     call Delay
+			      C     
+ 0000043F  33 DB	      C     xor  ebx, ebx
+ 00000441  BE 00000000 R      C     mov  esi, OFFSET inputBuffer
+ 00000446  8B 0D 0000003D R   C     mov  ecx, inputLen
+ 0000044C		      C ES_A_Outer:
+ 0000044C  8A 06	      C     mov  al, [esi]
+ 0000044E  46		      C     inc  esi
+ 0000044F  3C 61	      C     cmp  al, 'a'
+ 00000451  7C 06	      C     jl   ES_A_Upper
+ 00000453  3C 7A	      C     cmp  al, 'z'
+ 00000455  7F 02	      C     jg   ES_A_Upper
+ 00000457  2C 20	      C     sub  al, 32
+ 00000459		      C ES_A_Upper:
+ 00000459  3C 30	      C     cmp  al, '0'
+ 0000045B  7C 0C	      C     jl   ES_A_NotAlpha
+ 0000045D  3C 39	      C     cmp  al, '9'
+ 0000045F  7E 32	      C     jle  ES_A_Digit
+ 00000461  3C 41	      C     cmp  al, 'A'
+ 00000463  7C 04	      C     jl   ES_A_NotAlpha
+ 00000465  3C 5A	      C     cmp  al, 'Z'
+ 00000467  7E 1B	      C     jle  ES_A_Letter
+			      C 
+ 00000469		      C ES_A_NotAlpha:
+ 00000469  3C 20	      C     cmp  al, ' '
+ 0000046B  74 05	      C     je   ES_A_Word
+ 0000046D  E9 000000FD	      C     jmp  ES_A_Next
+ 00000472		      C ES_A_Word:
+ 00000472  83 C3 03	      C     add  ebx, 3
+ 00000475  B8 000000FA	      C     mov  eax, LETTER_DELAY
+ 0000047A  E8 00000000 E      C     call Delay
+ 0000047F  E9 000000EB	      C     jmp  ES_A_Next
+ 00000484		      C ES_A_Letter:
+ 00000484  0F B6 F8	      C     movzx edi, al
+ 00000487  83 EF 41	      C     sub   edi, 'A'
+ 0000048A  8B 14 BD	      C     mov   edx, MorseTableAlpha[edi*4]
+	   00000669 R
+ 00000491  EB 0D	      C     jmp   ES_A_Syms
+ 00000493		      C ES_A_Digit:
+ 00000493  0F B6 F8	      C     movzx edi, al
+ 00000496  83 EF 30	      C     sub   edi, '0'
+ 00000499  8B 14 BD	      C     mov   edx, MorseTableDigit[edi*4]
+	   000006D1 R
+ 000004A0		      C ES_A_Syms:
+ 000004A0  51		      C     push  ecx
+ 000004A1  56		      C     push  esi
+ 000004A2  8B F2	      C     mov   esi, edx
+ 000004A4		      C ES_A_Inner:
+ 000004A4  8A 06	      C     mov  al, [esi]
+ 000004A6  3C 00	      C     cmp  al, 0
+ 000004A8  0F 84 000000B4     C     je   ES_A_InDone
+ 000004AE  8A D3	      C     mov  dl, bl
+ 000004B0  B6 10	      C     mov  dh, MORSE_ROW
+ 000004B2  E8 00000000 E      C     call Gotoxy
+ 000004B7  B0 E0	      C     mov  al, COLOR_HIGHLIGHT
+ 000004B9  E8 00000000 E      C     call SetTextColor
+ 000004BE  8A 06	      C     mov  al, [esi]
+ 000004C0  E8 00000000 E      C     call WriteChar
+ 000004C5  3C 2E	      C     cmp  al, '.'
+ 000004C7  74 16	      C     je   ES_A_Dot
+ 000004C9  C7 05 00000041 R   C     mov  beepFreq, DOT_FREQ
+	   00000320
+ 000004D3  C7 05 00000045 R   C     mov  beepDur,  DASH_DURATION
+	   00000190
+ 000004DD  EB 14	      C     jmp  ES_A_Launch
+ 000004DF		      C ES_A_Dot:
+ 000004DF  C7 05 00000041 R   C     mov  beepFreq, DOT_FREQ
+	   00000320
+ 000004E9  C7 05 00000045 R   C     mov  beepDur,  DOT_DURATION
+	   00000096
+ 000004F3		      C ES_A_Launch:
+			      C     INVOKE CreateThread, NULL, 0, OFFSET BeepThreadProc, NULL, 0, ADDR dwThreadId
+ 0000050A  A3 00000049 R      C     mov  hBeepThread, eax
+ 0000050F  B8 00000258	      C     mov  eax, HIGHLIGHT_DURATION
+ 00000514  E8 00000000 E      C     call Delay
+ 00000519  8A D3	      C     mov  dl, bl
+ 0000051B  B6 10	      C     mov  dh, MORSE_ROW
+ 0000051D  E8 00000000 E      C     call Gotoxy
+ 00000522  B0 0A	      C     mov  al, COLOR_MORSE
+ 00000524  E8 00000000 E      C     call SetTextColor
+ 00000529  8A 06	      C     mov  al, [esi]
+ 0000052B  E8 00000000 E      C     call WriteChar
+			      C     ; --- CreateThread NULL-handle guard: only wait/close if thread was created ---
+ 00000530  83 3D 00000049 R   C     cmp  hBeepThread, 0
+	   00
+ 00000537  74 18	      C     je   ES_A_ThreadDone
+			      C     INVOKE WaitForSingleObject, hBeepThread, 0FFFFFFFFh
+			      C     INVOKE CloseHandle, hBeepThread
+ 00000551		      C ES_A_ThreadDone:
+ 00000551  B8 00000050	      C     mov  eax, SYMBOL_DELAY
+ 00000556  E8 00000000 E      C     call Delay
+ 0000055B  43		      C     inc  ebx
+ 0000055C  46		      C     inc  esi
+ 0000055D  E9 FFFFFF42	      C     jmp  ES_A_Inner
+ 00000562		      C ES_A_InDone:
+ 00000562  43		      C     inc  ebx
+ 00000563  B8 000000FA	      C     mov  eax, LETTER_DELAY
+ 00000568  E8 00000000 E      C     call Delay
+ 0000056D  5E		      C     pop  esi
+ 0000056E  59		      C     pop  ecx
+ 0000056F		      C ES_A_Next:
+ 0000056F  49		      C     dec  ecx
+ 00000570  0F 85 FFFFFED6     C     jnz  ES_A_Outer
+ 00000576		      C ES_End:
+ 00000576  C3		      C     ret
+ 00000577		      C EncodeSound ENDP
+			      C 
+ 00000577		      C DoEncodingSound PROC
+ 00000577  E8 FFFFFB1B	      C     call DrawTitleBar
+			      C     INVOKE DrawSubHeader, OFFSET strModeSound
+ 00000586  B6 08	      C     mov  dh, 8
+ 00000588  E8 FFFFFAF1	      C     call PrintSectionLine
+			      C 
+ 0000058D  B6 0B	      C     mov  dh, 11
+ 0000058F  B2 00	      C     mov  dl, 0
+ 00000591  E8 00000000 E      C     call Gotoxy
+ 00000596  B0 0B	      C     mov  al, COLOR_PROMPT
+ 00000598  E8 00000000 E      C     call SetTextColor
+ 0000059D  BA 00000378 R      C     mov  edx, OFFSET strEnterText
+ 000005A2  E8 00000000 E      C     call WriteString
+ 000005A7  B0 0E	      C     mov  al, COLOR_INPUT
+ 000005A9  E8 00000000 E      C     call SetTextColor
+ 000005AE  BA 00000000 R      C     mov  edx, OFFSET inputBuffer
+ 000005B3  B9 0000003C	      C     mov  ecx, MAX_INPUT_LEN
+ 000005B8  E8 00000000 E      C     call ReadString
+ 000005BD  A3 0000003D R      C     mov  inputLen, eax
+			      C     ; --- Empty input guard ---
+ 000005C2  83 F8 00	      C     cmp  eax, 0
+ 000005C5  75 1C	      C     jne  ES_CheckMorse
+ 000005C7  B6 14	      C     mov  dh, 20
+ 000005C9  B2 00	      C     mov  dl, 0
+ 000005CB  E8 00000000 E      C     call Gotoxy
+ 000005D0  B0 0C	      C     mov  al, COLOR_ERROR
+ 000005D2  E8 00000000 E      C     call SetTextColor
+ 000005D7  BA 0000043B R      C     mov  edx, OFFSET strNoInput
+ 000005DC  E8 00000000 E      C     call WriteString
+ 000005E1  EB 4C	      C     jmp  ES_WaitKey
+ 000005E3		      C ES_CheckMorse:
+ 000005E3  E8 FFFFFC80	      C     call CheckIfMorseInput
+ 000005E8  83 F8 01	      C     cmp  eax, 1
+ 000005EB  75 1C	      C     jne  ES_HasInput
+ 000005ED  B6 14	      C     mov  dh, 20
+ 000005EF  B2 00	      C     mov  dl, 0
+ 000005F1  E8 00000000 E      C     call Gotoxy
+ 000005F6  B0 0C	      C     mov  al, COLOR_ERROR
+ 000005F8  E8 00000000 E      C     call SetTextColor
+ 000005FD  BA 000004ED R      C     mov  edx, OFFSET strTextNotMorse
+ 00000602  E8 00000000 E      C     call WriteString
+ 00000607  EB 26	      C     jmp  ES_WaitKey
+ 00000609		      C ES_HasInput:
+ 00000609  B6 0D	      C     mov  dh, 13
+ 0000060B  E8 FFFFFA6E	      C     call PrintSectionLine
+			      C 
+ 00000610  B6 0F	      C     mov  dh, 15
+ 00000612  B2 00	      C     mov  dl, 0
+ 00000614  E8 00000000 E      C     call Gotoxy
+ 00000619  B0 0B	      C     mov  al, COLOR_PROMPT
+ 0000061B  E8 00000000 E      C     call SetTextColor
+ 00000620  BA 0000038C R      C     mov  edx, OFFSET strYourMorse
+ 00000625  E8 00000000 E      C     call WriteString
+ 0000062A  E8 FFFFFD5C	      C     call EncodeSound
+ 0000062F		      C ES_WaitKey:
+ 0000062F  B6 18	      C     mov  dh, 24
+ 00000631  B2 00	      C     mov  dl, 0
+ 00000633  E8 00000000 E      C     call Gotoxy
+ 00000638  B0 08	      C     mov  al, COLOR_DIM
+ 0000063A  E8 00000000 E      C     call SetTextColor
+ 0000063F  BA 000003F4 R      C     mov  edx, OFFSET strPressAny
+ 00000644  E8 00000000 E      C     call WriteString
+ 00000649  E8 00000000 E      C     call ReadChar
+ 0000064E  C3		      C     ret
+ 0000064F		      C DoEncodingSound ENDP
+			      C 
+				INCLUDE text_to_morse.asm
+			      C ; =============================================================================
+			      C ; text_to_morse.asm  –  Text → Morse  (Visual / Silent mode)
+			      C ; =============================================================================
+			      C 
+ 0000072B		      C .DATA
+ 0000072B 20 20 20 54 45      C strModeVis   BYTE "   TEXT  TO  MORSE  ENCODING   |   VISUAL  MODE   ", 0
+	   58 54 20 20 54
+	   4F 20 20 4D 4F
+	   52 53 45 20 20
+	   45 4E 43 4F 44
+	   49 4E 47 20 20
+	   20 7C 20 20 20
+	   56 49 53 55 41
+	   4C 20 20 4D 4F
+	   44 45 20 20 20
+	   00
+			      C 
+ 0000064F		      C .CODE
+			      C 
+			      C ; =============================================================================
+			      C ; PROC: EncodeVisual (Left-Aligned Standard Characters)
+			      C ; =============================================================================
+ 0000064F		      C EncodeVisual PROC
+ 0000064F  B0 0A	      C     mov  al, COLOR_MORSE
+ 00000651  E8 00000000 E      C     call SetTextColor
+ 00000656  B2 00	      C     mov  dl, 0
+ 00000658  B6 10	      C     mov  dh, MORSE_ROW
+ 0000065A  E8 00000000 E      C     call Gotoxy
+			      C 
+ 0000065F  BE 00000000 R      C     mov  esi, OFFSET inputBuffer
+ 00000664  8B 0D 0000003D R   C     mov  ecx, inputLen
+ 0000066A  83 F9 00	      C     cmp  ecx, 0
+ 0000066D  0F 84 000000C6     C     je   EV_End
+			      C 
+ 00000673		      C EV_Outer:
+ 00000673  8A 06	      C     mov  al, [esi]
+ 00000675  46		      C     inc  esi
+ 00000676  3C 61	      C     cmp  al, 'a'
+ 00000678  7C 06	      C     jl   EV_CheckUpper
+ 0000067A  3C 7A	      C     cmp  al, 'z'
+ 0000067C  7F 02	      C     jg   EV_CheckUpper
+ 0000067E  2C 20	      C     sub  al, 32
+ 00000680		      C EV_CheckUpper:
+ 00000680  3C 30	      C     cmp  al, '0'
+ 00000682  7C 0C	      C     jl   EV_NotAlpha
+ 00000684  3C 39	      C     cmp  al, '9'
+ 00000686  7E 6B	      C     jle  EV_IsDigit
+ 00000688  3C 41	      C     cmp  al, 'A'
+ 0000068A  7C 04	      C     jl   EV_NotAlpha
+ 0000068C  3C 5A	      C     cmp  al, 'Z'
+ 0000068E  7E 54	      C     jle  EV_IsLetter
+			      C 
+ 00000690		      C EV_NotAlpha:
+ 00000690  3C 20	      C     cmp  al, ' '
+ 00000692  74 44	      C     je   EV_WordSep
+			      C     ; --- Invalid character: show brief notice, then skip ---
+ 00000694  51		      C     push ecx
+ 00000695  56		      C     push esi
+ 00000696  B6 16	      C     mov  dh, 22
+ 00000698  B2 00	      C     mov  dl, 0
+ 0000069A  E8 00000000 E      C     call Gotoxy
+ 0000069F  B0 0C	      C     mov  al, COLOR_ERROR
+ 000006A1  E8 00000000 E      C     call SetTextColor
+ 000006A6  BA 0000041B R      C     mov  edx, OFFSET strInvalidChar
+ 000006AB  E8 00000000 E      C     call WriteString
+ 000006B0  B8 000002BC	      C     mov  eax, 700
+ 000006B5  E8 00000000 E      C     call Delay
+ 000006BA  B6 16	      C     mov  dh, 22
+ 000006BC  B2 00	      C     mov  dl, 0
+ 000006BE  E8 00000000 E      C     call Gotoxy
+ 000006C3  B0 07	      C     mov  al, COLOR_NORMAL
+ 000006C5  E8 00000000 E      C     call SetTextColor
+ 000006CA  BA 00000578 R      C     mov  edx, OFFSET strBlankLine
+ 000006CF  E8 00000000 E      C     call WriteString
+ 000006D4  5E		      C     pop  esi
+ 000006D5  59		      C     pop  ecx
+ 000006D6  EB 5A	      C     jmp  EV_Next
+ 000006D8		      C EV_WordSep:
+ 000006D8  BA 000005BD R      C     mov  edx, OFFSET strWordSep
+ 000006DD  E8 00000000 E      C     call WriteString
+ 000006E2  EB 4E	      C     jmp  EV_Next
+ 000006E4		      C EV_IsLetter:
+ 000006E4  0F B6 F8	      C     movzx edi, al
+ 000006E7  83 EF 41	      C     sub   edi, 'A'
+ 000006EA  8B 14 BD	      C     mov   edx, MorseTableAlpha[edi*4]
+	   00000669 R
+ 000006F1  EB 0D	      C     jmp   EV_Symbols
+ 000006F3		      C EV_IsDigit:
+ 000006F3  0F B6 F8	      C     movzx edi, al
+ 000006F6  83 EF 30	      C     sub   edi, '0'
+ 000006F9  8B 14 BD	      C     mov   edx, MorseTableDigit[edi*4]
+	   000006D1 R
+			      C 
+ 00000700		      C EV_Symbols:
+ 00000700  51		      C     push  ecx
+ 00000701  56		      C     push  esi
+ 00000702  8B F2	      C     mov   esi, edx
+ 00000704		      C EV_Inner:
+ 00000704  8A 06	      C     mov  al, [esi]
+ 00000706  3C 00	      C     cmp  al, 0
+ 00000708  74 12	      C     je   EV_InnerDone
+ 0000070A  E8 00000000 E      C     call WriteChar
+ 0000070F  B8 00000050	      C     mov  eax, SYMBOL_DELAY
+ 00000714  E8 00000000 E      C     call Delay
+ 00000719  46		      C     inc  esi
+ 0000071A  EB E8	      C     jmp  EV_Inner
+ 0000071C		      C EV_InnerDone:
+ 0000071C  BA 000005BB R      C     mov  edx, OFFSET strLetterGap
+ 00000721  E8 00000000 E      C     call WriteString
+ 00000726  B8 000000FA	      C     mov  eax, LETTER_DELAY
+ 0000072B  E8 00000000 E      C     call Delay
+ 00000730  5E		      C     pop  esi
+ 00000731  59		      C     pop  ecx
+			      C 
+ 00000732		      C EV_Next:
+ 00000732  49		      C     dec  ecx
+ 00000733  0F 85 FFFFFF3A     C     jnz  EV_Outer
+			      C 
+ 00000739		      C EV_End:
+ 00000739  C3		      C     ret
+ 0000073A		      C EncodeVisual ENDP
+			      C 
+ 0000073A		      C DoEncodingVisual PROC
+ 0000073A  E8 FFFFF958	      C     call DrawTitleBar
+			      C     INVOKE DrawSubHeader, OFFSET strModeVis
+			      C 
+			      C     ; Row 8 - Section
+ 00000749  B6 08	      C     mov  dh, 8
+ 0000074B  E8 FFFFF92E	      C     call PrintSectionLine
+			      C 
+			      C     ; Row 11 - Input Prompt
+ 00000750  B6 0B	      C     mov  dh, 11
+ 00000752  B2 00	      C     mov  dl, 0
+ 00000754  E8 00000000 E      C     call Gotoxy
+ 00000759  B0 0B	      C     mov  al, COLOR_PROMPT
+ 0000075B  E8 00000000 E      C     call SetTextColor
+ 00000760  BA 00000378 R      C     mov  edx, OFFSET strEnterText
+ 00000765  E8 00000000 E      C     call WriteString
+ 0000076A  B0 0E	      C     mov  al, COLOR_INPUT
+ 0000076C  E8 00000000 E      C     call SetTextColor
+ 00000771  BA 00000000 R      C     mov  edx, OFFSET inputBuffer
+ 00000776  B9 0000003C	      C     mov  ecx, MAX_INPUT_LEN
+ 0000077B  E8 00000000 E      C     call ReadString
+ 00000780  A3 0000003D R      C     mov  inputLen, eax
+			      C 
+			      C     ; --- Empty input guard ---
+ 00000785  83 3D 0000003D R   C     cmp  inputLen, 0
+	   00
+ 0000078C  75 1C	      C     jne  DEV_CheckMorse
+ 0000078E  B6 14	      C     mov  dh, 20
+ 00000790  B2 00	      C     mov  dl, 0
+ 00000792  E8 00000000 E      C     call Gotoxy
+ 00000797  B0 0C	      C     mov  al, COLOR_ERROR
+ 00000799  E8 00000000 E      C     call SetTextColor
+ 0000079E  BA 0000043B R      C     mov  edx, OFFSET strNoInput
+ 000007A3  E8 00000000 E      C     call WriteString
+ 000007A8  EB 4C	      C     jmp  DEV_WaitKey
+ 000007AA		      C DEV_CheckMorse:
+ 000007AA  E8 FFFFFAB9	      C     call CheckIfMorseInput
+ 000007AF  83 F8 01	      C     cmp  eax, 1
+ 000007B2  75 1C	      C     jne  DEV_HasInput
+ 000007B4  B6 14	      C     mov  dh, 20
+ 000007B6  B2 00	      C     mov  dl, 0
+ 000007B8  E8 00000000 E      C     call Gotoxy
+ 000007BD  B0 0C	      C     mov  al, COLOR_ERROR
+ 000007BF  E8 00000000 E      C     call SetTextColor
+ 000007C4  BA 000004ED R      C     mov  edx, OFFSET strTextNotMorse
+ 000007C9  E8 00000000 E      C     call WriteString
+ 000007CE  EB 26	      C     jmp  DEV_WaitKey
+ 000007D0		      C DEV_HasInput:
+			      C     ; Row 13 - Output section
+ 000007D0  B6 0D	      C     mov  dh, 13
+ 000007D2  E8 FFFFF8A7	      C     call PrintSectionLine
+			      C     
+			      C     ; Row 15 - Morse label
+ 000007D7  B6 0F	      C     mov  dh, 15
+ 000007D9  B2 00	      C     mov  dl, 0
+ 000007DB  E8 00000000 E      C     call Gotoxy
+ 000007E0  B0 0B	      C     mov  al, COLOR_PROMPT
+ 000007E2  E8 00000000 E      C     call SetTextColor
+ 000007E7  BA 0000038C R      C     mov  edx, OFFSET strYourMorse
+ 000007EC  E8 00000000 E      C     call WriteString
+			      C     
+ 000007F1  E8 FFFFFE59	      C     call EncodeVisual
+ 000007F6		      C DEV_WaitKey:
+ 000007F6  B6 18	      C     mov  dh, 24
+ 000007F8  B2 00	      C     mov  dl, 0
+ 000007FA  E8 00000000 E      C     call Gotoxy
+ 000007FF  B0 08	      C     mov  al, COLOR_DIM
+ 00000801  E8 00000000 E      C     call SetTextColor
+ 00000806  BA 000003F4 R      C     mov  edx, OFFSET strPressAny
+ 0000080B  E8 00000000 E      C     call WriteString
+ 00000810  E8 00000000 E      C     call ReadChar
+ 00000815  C3		      C     ret
+ 00000816		      C DoEncodingVisual ENDP
+			      C 
+				INCLUDE morse_to_text.asm
+			      C ; =============================================================================
+			      C ; morse_to_text.asm  –  Morse → Text  (Decode mode)
+			      C ; =============================================================================
+			      C 
+ 0000075E		      C .DATA
+ 0000075E 20 20 20 4D 4F      C strModeDecode BYTE "   MORSE  TO  TEXT  DECODING   |   TRANSLATION  MODE   ", 0
+	   52 53 45 20 20
+	   54 4F 20 20 54
+	   45 58 54 20 20
+	   44 45 43 4F 44
+	   49 4E 47 20 20
+	   20 7C 20 20 20
+	   54 52 41 4E 53
+	   4C 41 54 49 4F
+	   4E 20 20 4D 4F
+	   44 45 20 20 20
+	   00
+			      C 
+ 00000051		      C .DATA?
+ 00000051  00000014 [	      C tokenBuffer BYTE 20 DUP(?)
+	    00
+	   ]
+ 00000065 00000000	      C tokenLen    DWORD ?
+ 00000069  00000064 [	      C decodedBuffer BYTE 100 DUP(?)
+	    00
+	   ]
+			      C 
+ 00000816		      C .CODE
+			      C 
+ 00000816		      C CompareStrings PROC
+ 00000816  50		      C     push eax
+ 00000817  56		      C     push esi
+ 00000818  57		      C     push edi
+ 00000819		      C CS_Loop:
+ 00000819  8A 06	      C     mov  al, [esi]
+ 0000081B  8A 27	      C     mov  ah, [edi]
+ 0000081D  38 E0	      C     cmp  al, ah
+ 0000081F  75 08	      C     jne  CS_NotEqual
+ 00000821  3C 00	      C     cmp  al, 0
+ 00000823  74 0A	      C     je   CS_Equal
+ 00000825  46		      C     inc  esi
+ 00000826  47		      C     inc  edi
+ 00000827  EB F0	      C     jmp  CS_Loop
+ 00000829		      C CS_NotEqual:
+ 00000829  0C 01	      C     or   al, 1
+ 0000082B  5F		      C     pop  edi
+ 0000082C  5E		      C     pop  esi
+ 0000082D  58		      C     pop  eax
+ 0000082E  C3		      C     ret
+ 0000082F		      C CS_Equal:
+ 0000082F  38 C0	      C     cmp  al, al
+ 00000831  5F		      C     pop  edi
+ 00000832  5E		      C     pop  esi
+ 00000833  58		      C     pop  eax
+ 00000834  C3		      C     ret
+ 00000835		      C CompareStrings ENDP
+			      C 
+ 00000835		      C DoDecoding PROC
+ 00000835  E8 FFFFF85D	      C     call DrawTitleBar
+			      C     INVOKE DrawSubHeader, OFFSET strModeDecode
+			      C     
+			      C     ; Row 8 - Section
+ 00000844  B6 08	      C     mov  dh, 8
+ 00000846  E8 FFFFF833	      C     call PrintSectionLine
+			      C 
+			      C     ; Row 11 - Input Prompt
+ 0000084B  B6 0B	      C     mov  dh, 11
+ 0000084D  B2 00	      C     mov  dl, 0
+ 0000084F  E8 00000000 E      C     call Gotoxy
+ 00000854  B0 0B	      C     mov  al, COLOR_PROMPT
+ 00000856  E8 00000000 E      C     call SetTextColor
+ 0000085B  BA 000003CC R      C     mov  edx, OFFSET strEnterMorse
+ 00000860  E8 00000000 E      C     call WriteString
+ 00000865  B0 0E	      C     mov  al, COLOR_INPUT
+ 00000867  E8 00000000 E      C     call SetTextColor
+ 0000086C  BA 00000000 R      C     mov  edx, OFFSET inputBuffer
+ 00000871  B9 0000003C	      C     mov  ecx, MAX_INPUT_LEN
+ 00000876  E8 00000000 E      C     call ReadString
+ 0000087B  A3 0000003D R      C     mov  inputLen, eax
+			      C     ; --- Empty input guard ---
+ 00000880  83 F8 00	      C     cmp  eax, 0
+ 00000883  75 1F	      C     jne  Dec_CheckText
+ 00000885  B6 14	      C     mov  dh, 20
+ 00000887  B2 00	      C     mov  dl, 0
+ 00000889  E8 00000000 E      C     call Gotoxy
+ 0000088E  B0 0C	      C     mov  al, COLOR_ERROR
+ 00000890  E8 00000000 E      C     call SetTextColor
+ 00000895  BA 00000478 R      C     mov  edx, OFFSET strEmptyMorse
+ 0000089A  E8 00000000 E      C     call WriteString
+ 0000089F  E9 0000015D	      C     jmp  Dec_WaitKey
+ 000008A4		      C Dec_CheckText:
+ 000008A4  E8 FFFFFA05	      C     call CheckIfTextInput
+ 000008A9  83 F8 01	      C     cmp  eax, 1
+ 000008AC  75 1F	      C     jne  Dec_HasInput
+ 000008AE  B6 14	      C     mov  dh, 20
+ 000008B0  B2 00	      C     mov  dl, 0
+ 000008B2  E8 00000000 E      C     call Gotoxy
+ 000008B7  B0 0C	      C     mov  al, COLOR_ERROR
+ 000008B9  E8 00000000 E      C     call SetTextColor
+ 000008BE  BA 00000533 R      C     mov  edx, OFFSET strMorseNotText
+ 000008C3  E8 00000000 E      C     call WriteString
+ 000008C8  E9 00000134	      C     jmp  Dec_WaitKey
+ 000008CD		      C Dec_HasInput:
+			      C 
+			      C     ; Row 13 - Output section
+ 000008CD  B6 0D	      C     mov  dh, 13
+ 000008CF  E8 FFFFF7AA	      C     call PrintSectionLine
+			      C 
+			      C     ; Row 15 - Result label
+ 000008D4  B6 0F	      C     mov  dh, 15
+ 000008D6  B2 00	      C     mov  dl, 0
+ 000008D8  E8 00000000 E      C     call Gotoxy
+ 000008DD  B0 0B	      C     mov  al, COLOR_PROMPT
+ 000008DF  E8 00000000 E      C     call SetTextColor
+ 000008E4  BA 000003E0 R      C     mov  edx, OFFSET strYourText
+ 000008E9  E8 00000000 E      C     call WriteString
+			      C 
+			      C     ; --- Decoding Logic ---
+ 000008EE  BF 00000069 R      C     mov  edi, OFFSET decodedBuffer
+ 000008F3  B9 00000064	      C     mov  ecx, 100
+ 000008F8  32 C0	      C     xor  al, al
+ 000008FA  F3/ AA	      C     rep  stosb
+ 000008FC  BE 00000000 R      C     mov  esi, OFFSET inputBuffer
+ 00000901  8B 0D 0000003D R   C     mov  ecx, inputLen
+ 00000907  BD 00000069 R      C     mov  ebp, OFFSET decodedBuffer
+ 0000090C  83 F9 00	      C     cmp  ecx, 0
+ 0000090F  0F 84 000000EC     C     je   DecodeEnd
+ 00000915		      C ParseLoop:
+ 00000915  BF 00000051 R      C     mov  edi, OFFSET tokenBuffer
+ 0000091A  C7 05 00000065 R   C     mov  tokenLen, 0
+	   00000000
+ 00000924		      C ExtractToken:
+ 00000924  83 F9 00	      C     cmp  ecx, 0
+ 00000927  74 39	      C     je   EndToken
+ 00000929  8A 06	      C     mov  al, [esi]
+ 0000092B  3C 20	      C     cmp  al, ' '
+ 0000092D  74 26	      C     je   SpaceFound
+			      C     ; --- Valid Morse char filter: only '.', '-', '/' are stored ---
+ 0000092F  3C 2E	      C     cmp  al, '.'
+ 00000931  74 0C	      C     je   MT_StoreChar
+ 00000933  3C 2D	      C     cmp  al, '-'
+ 00000935  74 08	      C     je   MT_StoreChar
+ 00000937  3C 2F	      C     cmp  al, '/'
+ 00000939  74 04	      C     je   MT_StoreChar
+			      C     ; Not a valid Morse character - skip it silently
+ 0000093B  46		      C     inc  esi
+ 0000093C  49		      C     dec  ecx
+ 0000093D  EB E5	      C     jmp  ExtractToken
+ 0000093F		      C MT_StoreChar:
+ 0000093F  88 07	      C     mov  [edi], al
+ 00000941  47		      C     inc  edi
+ 00000942  FF 05 00000065 R   C     inc  tokenLen
+ 00000948  46		      C     inc  esi
+ 00000949  49		      C     dec  ecx
+			      C     ; --- Token overflow guard: cap at 19 chars to protect tokenBuffer ---
+ 0000094A  83 3D 00000065 R   C     cmp  tokenLen, 19
+	   13
+ 00000951  7D 18	      C     jge  FindLookup
+ 00000953  EB CF	      C     jmp  ExtractToken
+ 00000955		      C SpaceFound:
+ 00000955  46		      C     inc  esi
+ 00000956  49		      C     dec  ecx
+ 00000957  83 3D 00000065 R   C     cmp  tokenLen, 0
+	   00
+ 0000095E  74 B5	      C     je   ParseLoop
+ 00000960  EB 09	      C     jmp  FindLookup
+ 00000962		      C EndToken:
+ 00000962  83 3D 00000065 R   C     cmp  tokenLen, 0
+	   00
+ 00000969  74 7C	      C     je   PrintResult
+ 0000096B		      C FindLookup:
+ 0000096B  C6 07 00	      C     mov  byte ptr [edi], 0
+ 0000096E  BF 00000051 R      C     mov  edi, OFFSET tokenBuffer
+ 00000973  80 3F 2F	      C     cmp  byte ptr [edi], '/'
+ 00000976  75 07	      C     jne  CheckAlpha
+ 00000978  C6 45 00 20	      C     mov  byte ptr [ebp], ' '
+ 0000097C  45		      C     inc  ebp
+ 0000097D  EB 96	      C     jmp  ParseLoop
+ 0000097F		      C CheckAlpha:
+ 0000097F  BB 00000000	      C     mov  ebx, 0
+ 00000984		      C AlphaLoop:
+ 00000984  BF 00000051 R      C     mov  edi, OFFSET tokenBuffer
+ 00000989  8B 14 9D	      C     mov  edx, MorseTableAlpha[ebx*4]
+	   00000669 R
+ 00000990  56		      C     push esi
+ 00000991  8B F2	      C     mov  esi, edx
+ 00000993  E8 FFFFFE7E	      C     call CompareStrings
+ 00000998  5E		      C     pop  esi
+ 00000999  74 32	      C     je   FoundAlpha
+ 0000099B  43		      C     inc  ebx
+ 0000099C  83 FB 1A	      C     cmp  ebx, 26
+ 0000099F  7C E3	      C     jl   AlphaLoop
+ 000009A1  BB 00000000	      C     mov  ebx, 0
+ 000009A6		      C DigitLoop:
+ 000009A6  BF 00000051 R      C     mov  edi, OFFSET tokenBuffer
+ 000009AB  8B 14 9D	      C     mov  edx, MorseTableDigit[ebx*4]
+	   000006D1 R
+ 000009B2  56		      C     push esi
+ 000009B3  8B F2	      C     mov  esi, edx
+ 000009B5  E8 FFFFFE5C	      C     call CompareStrings
+ 000009BA  5E		      C     pop  esi
+ 000009BB  74 1D	      C     je   FoundDigit
+ 000009BD  43		      C     inc  ebx
+ 000009BE  83 FB 0A	      C     cmp  ebx, 10
+ 000009C1  7C E3	      C     jl   DigitLoop
+ 000009C3  C6 45 00 3F	      C     mov  byte ptr [ebp], '?'
+ 000009C7  45		      C     inc  ebp
+ 000009C8  E9 FFFFFF48	      C     jmp  ParseLoop
+ 000009CD		      C FoundAlpha:
+ 000009CD  B0 41	      C     mov  al, 'A'
+ 000009CF  02 C3	      C     add  al, bl
+ 000009D1  88 45 00	      C     mov  [ebp], al
+ 000009D4  45		      C     inc  ebp
+ 000009D5  E9 FFFFFF3B	      C     jmp  ParseLoop
+ 000009DA		      C FoundDigit:
+ 000009DA  B0 30	      C     mov  al, '0'
+ 000009DC  02 C3	      C     add  al, bl
+ 000009DE  88 45 00	      C     mov  [ebp], al
+ 000009E1  45		      C     inc  ebp
+ 000009E2  E9 FFFFFF2E	      C     jmp  ParseLoop
+ 000009E7		      C PrintResult:
+ 000009E7  B2 16	      C     mov  dl, 22
+ 000009E9  B6 0F	      C     mov  dh, 15
+ 000009EB  E8 00000000 E      C     call Gotoxy
+ 000009F0  B0 0A	      C     mov  al, COLOR_MORSE
+ 000009F2  E8 00000000 E      C     call SetTextColor
+ 000009F7  BA 00000069 R      C     mov  edx, OFFSET decodedBuffer
+ 000009FC  E8 00000000 E      C     call WriteString
+ 00000A01		      C DecodeEnd:
+ 00000A01		      C Dec_WaitKey:
+ 00000A01  B6 18	      C     mov  dh, 24
+ 00000A03  B2 00	      C     mov  dl, 0
+ 00000A05  E8 00000000 E      C     call Gotoxy
+ 00000A0A  B0 08	      C     mov  al, COLOR_DIM
+ 00000A0C  E8 00000000 E      C     call SetTextColor
+ 00000A11  BA 000003F4 R      C     mov  edx, OFFSET strPressAny
+ 00000A16  E8 00000000 E      C     call WriteString
+ 00000A1B  E8 00000000 E      C     call ReadChar
+ 00000A20  C3		      C     ret
+ 00000A21		      C DoDecoding ENDP
+			      C 
+				INCLUDE morse_to_blink.asm
+			      C ; =============================================================================
+			      C ; morse_to_blink.asm  –  Morse Blink / Flash mode
+			      C ; =============================================================================
+			      C 
+ = FFFFFFF5		      C STD_OUTPUT_HANDLE_VAL   EQU 0FFFFFFF5h
+ = 000000FF		      C BLINK_COLOR_ON          EQU 0FFh
+ = 00000000		      C BLINK_COLOR_OFF         EQU 000h
+			      C 
+ = 0000000A		      C BLINK_X                 EQU 10
+ = 00000014		      C BLINK_Y                 EQU 20
+ = 0000003C		      C BLINK_WIDTH             EQU 60
+ = 00000005		      C BLINK_HEIGHT            EQU 5
+			      C 
+ 00000796		      C .DATA
+ 00000796 20 20 20 4D 4F      C strModeBlink     BYTE "   MORSE  TO  BLINK  CODE  TRANSMISSION   |   FLASH MODE   ", 0
+	   52 53 45 20 20
+	   54 4F 20 20 42
+	   4C 49 4E 4B 20
+	   20 43 4F 44 45
+	   20 20 54 52 41
+	   4E 53 4D 49 53
+	   53 49 4F 4E 20
+	   20 20 7C 20 20
+	   20 46 4C 41 53
+	   48 20 4D 4F 44
+	   45 20 20 20 00
+ 000007D2 20 20 20 53 54      C strBlinkingLabel BYTE "   STATUS  :   TRANSMITTING VISUAL PULSES ...", 0
+	   41 54 55 53 20
+	   20 3A 20 20 20
+	   54 52 41 4E 53
+	   4D 49 54 54 49
+	   4E 47 20 56 49
+	   53 55 41 4C 20
+	   50 55 4C 53 45
+	   53 20 2E 2E 2E
+	   00
+			      C 
+ 000000CD		      C .DATA?
+ 000000CD 00000000	      C hMainConsole   DWORD ?
+ 000000D1 00000000	      C dwCellsWritten DWORD ?
+ 000000D5 00000000	      C dwAttrsWritten DWORD ?
+ 000000D9 0000		      C wHighlightAttr WORD  ?
+ 000000DB 0000		      C wNormalAttr    WORD  ?
+			      C 
+ 00000A21		      C .CODE
+			      C 
+ 00000A21		      C BlinkOn PROC
+			      C     LOCAL row:DWORD
+ 00000A27  C7 45 FC	      C     mov  row, 0
+	   00000000
+ 00000A2E		      C BON_Loop:
+ 00000A2E  0F B6 45 FC	      C     movzx eax, byte ptr row
+ 00000A32  83 C0 14	      C     add   eax, BLINK_Y
+ 00000A35  C1 E0 10	      C     shl   eax, 16
+ 00000A38  83 C8 0A	      C     or    eax, BLINK_X
+ 00000A3B  68 000000D1 R      C     push  OFFSET dwCellsWritten
+ 00000A40  50		      C     push  eax
+ 00000A41  6A 3C	      C     push  BLINK_WIDTH
+ 00000A43  68 000000FF	      C     push  BLINK_COLOR_ON
+ 00000A48  FF 35 000000CD R   C     push  hMainConsole
+ 00000A4E  E8 00000000 E      C     call  FillConsoleOutputAttribute
+ 00000A53  FF 45 FC	      C     inc   row
+ 00000A56  83 7D FC 05	      C     cmp   row, BLINK_HEIGHT
+ 00000A5A  7C D2	      C     jl    BON_Loop
+			      C     ret
+ 00000A5E		      C BlinkOn ENDP
+			      C 
+ 00000A5E		      C BlinkOff PROC
+			      C     LOCAL row:DWORD
+ 00000A64  C7 45 FC	      C     mov  row, 0
+	   00000000
+ 00000A6B		      C BOFF_Loop:
+ 00000A6B  0F B6 45 FC	      C     movzx eax, byte ptr row
+ 00000A6F  83 C0 14	      C     add   eax, BLINK_Y
+ 00000A72  C1 E0 10	      C     shl   eax, 16
+ 00000A75  83 C8 0A	      C     or    eax, BLINK_X
+ 00000A78  68 000000D1 R      C     push  OFFSET dwCellsWritten
+ 00000A7D  50		      C     push  eax
+ 00000A7E  6A 3C	      C     push  BLINK_WIDTH
+ 00000A80  6A 00	      C     push  BLINK_COLOR_OFF
+ 00000A82  FF 35 000000CD R   C     push  hMainConsole
+ 00000A88  E8 00000000 E      C     call  FillConsoleOutputAttribute
+ 00000A8D  FF 45 FC	      C     inc   row
+ 00000A90  83 7D FC 05	      C     cmp   row, BLINK_HEIGHT
+ 00000A94  7C D5	      C     jl    BOFF_Loop
+			      C     ret
+ 00000A98		      C BlinkOff ENDP
+			      C 
+ 00000A98		      C HighlightOn PROC
+ 00000A98  0F B6 C3	      C     movzx eax, bl
+ 00000A9B  BA 00000010	      C     mov   edx, MORSE_ROW
+ 00000AA0  C1 E2 10	      C     shl   edx, 16
+ 00000AA3  0B C2	      C     or    eax, edx
+ 00000AA5  68 000000D5 R      C     push  OFFSET dwAttrsWritten
+ 00000AAA  50		      C     push  eax
+ 00000AAB  6A 01	      C     push  1
+ 00000AAD  68 000000D9 R      C     push  OFFSET wHighlightAttr
+ 00000AB2  FF 35 000000CD R   C     push  hMainConsole
+ 00000AB8  E8 00000000 E      C     call  WriteConsoleOutputAttribute
+ 00000ABD  C3		      C     ret
+ 00000ABE		      C HighlightOn ENDP
+			      C 
+ 00000ABE		      C HighlightOff PROC
+ 00000ABE  0F B6 C3	      C     movzx eax, bl
+ 00000AC1  BA 00000010	      C     mov   edx, MORSE_ROW
+ 00000AC6  C1 E2 10	      C     shl   edx, 16
+ 00000AC9  0B C2	      C     or    eax, edx
+ 00000ACB  68 000000D5 R      C     push  OFFSET dwAttrsWritten
+ 00000AD0  50		      C     push  eax
+ 00000AD1  6A 01	      C     push  1
+ 00000AD3  68 000000DB R      C     push  OFFSET wNormalAttr
+ 00000AD8  FF 35 000000CD R   C     push  hMainConsole
+ 00000ADE  E8 00000000 E      C     call  WriteConsoleOutputAttribute
+ 00000AE3  C3		      C     ret
+ 00000AE4		      C HighlightOff ENDP
+			      C 
+ 00000AE4		      C EncodeBlink PROC
+ 00000AE4  B0 0A	      C     mov  al, COLOR_MORSE
+ 00000AE6  E8 00000000 E      C     call SetTextColor
+ 00000AEB  B2 00	      C     mov  dl, 0
+ 00000AED  B6 10	      C     mov  dh, MORSE_ROW
+ 00000AEF  E8 00000000 E      C     call Gotoxy
+			      C 
+ 00000AF4  BE 00000000 R      C     mov  esi, OFFSET inputBuffer
+ 00000AF9  8B 0D 0000003D R   C     mov  ecx, inputLen
+ 00000AFF  83 F9 00	      C     cmp  ecx, 0
+ 00000B02  0F 84 0000019E     C     je   EB_End
+			      C 
+ 00000B08		      C EB_C_Outer:
+ 00000B08  8A 06	      C     mov  al, [esi]
+ 00000B0A  46		      C     inc  esi
+ 00000B0B  3C 61	      C     cmp  al, 'a'
+ 00000B0D  7C 06	      C     jl   EB_C_Upper
+ 00000B0F  3C 7A	      C     cmp  al, 'z'
+ 00000B11  7F 02	      C     jg   EB_C_Upper
+ 00000B13  2C 20	      C     sub  al, 32
+ 00000B15		      C EB_C_Upper:
+ 00000B15  3C 30	      C     cmp  al, '0'
+ 00000B17  7C 0C	      C     jl   EB_C_NotAlpha
+ 00000B19  3C 39	      C     cmp  al, '9'
+ 00000B1B  7E 29	      C     jle  EB_C_Digit
+ 00000B1D  3C 41	      C     cmp  al, 'A'
+ 00000B1F  7C 04	      C     jl   EB_C_NotAlpha
+ 00000B21  3C 5A	      C     cmp  al, 'Z'
+ 00000B23  7E 12	      C     jle  EB_C_Letter
+			      C 
+ 00000B25		      C EB_C_NotAlpha:
+ 00000B25  3C 20	      C     cmp  al, ' '
+ 00000B27  74 02	      C     je   EB_C_Word
+ 00000B29  EB 46	      C     jmp  EB_C_Next
+ 00000B2B		      C EB_C_Word:
+ 00000B2B  BA 000005BD R      C     mov  edx, OFFSET strWordSep
+ 00000B30  E8 00000000 E      C     call WriteString
+ 00000B35  EB 3A	      C     jmp  EB_C_Next
+ 00000B37		      C EB_C_Letter:
+ 00000B37  0F B6 F8	      C     movzx edi, al
+ 00000B3A  83 EF 41	      C     sub   edi, 'A'
+ 00000B3D  8B 14 BD	      C     mov   edx, MorseTableAlpha[edi*4]
+	   00000669 R
+ 00000B44  EB 0D	      C     jmp   EB_C_Syms
+ 00000B46		      C EB_C_Digit:
+ 00000B46  0F B6 F8	      C     movzx edi, al
+ 00000B49  83 EF 30	      C     sub   edi, '0'
+ 00000B4C  8B 14 BD	      C     mov   edx, MorseTableDigit[edi*4]
+	   000006D1 R
+ 00000B53		      C EB_C_Syms:
+ 00000B53  51		      C     push  ecx
+ 00000B54  56		      C     push  esi
+ 00000B55  8B F2	      C     mov   esi, edx
+ 00000B57		      C EB_C_Inner:
+ 00000B57  8A 06	      C     mov  al, [esi]
+ 00000B59  3C 00	      C     cmp  al, 0
+ 00000B5B  74 08	      C     je   EB_C_InDone
+ 00000B5D  E8 00000000 E      C     call WriteChar
+ 00000B62  46		      C     inc  esi
+ 00000B63  EB F2	      C     jmp  EB_C_Inner
+ 00000B65		      C EB_C_InDone:
+ 00000B65  BA 000005BB R      C     mov  edx, OFFSET strLetterGap
+ 00000B6A  E8 00000000 E      C     call WriteString
+ 00000B6F  5E		      C     pop  esi
+ 00000B70  59		      C     pop  ecx
+ 00000B71		      C EB_C_Next:
+ 00000B71  49		      C     dec  ecx
+ 00000B72  75 94	      C     jnz  EB_C_Outer
+			      C 
+ 00000B74  B6 12	      C     mov  dh, 18
+ 00000B76  B2 00	      C     mov  dl, 0
+ 00000B78  E8 00000000 E      C     call Gotoxy
+ 00000B7D  B0 0B	      C     mov  al, COLOR_PROMPT
+ 00000B7F  E8 00000000 E      C     call SetTextColor
+ 00000B84  BA 000007D2 R      C     mov  edx, OFFSET strBlinkingLabel
+ 00000B89  E8 00000000 E      C     call WriteString
+ 00000B8E  B8 000001F4	      C     mov  eax, 500
+ 00000B93  E8 00000000 E      C     call Delay
+			      C     INVOKE GetStdHandle, STD_OUTPUT_HANDLE_VAL
+ 00000B9F  A3 000000CD R      C     mov   hMainConsole, eax
+			      C     ; --- GetStdHandle failure guard ---
+ 00000BA4  85 C0	      C     test  eax, eax
+ 00000BA6  74 07	      C     jz    EB_HandleError
+ 00000BA8  83 F8 FF	      C     cmp   eax, 0FFFFFFFFh
+ 00000BAB  74 02	      C     je    EB_HandleError
+ 00000BAD  EB 1F	      C     jmp   EB_HandleOk
+ 00000BAF		      C EB_HandleError:
+ 00000BAF  B6 16	      C     mov  dh, 22
+ 00000BB1  B2 00	      C     mov  dl, 0
+ 00000BB3  E8 00000000 E      C     call Gotoxy
+ 00000BB8  B0 0C	      C     mov  al, COLOR_ERROR
+ 00000BBA  E8 00000000 E      C     call SetTextColor
+ 00000BBF  BA 000004B5 R      C     mov  edx, OFFSET strHandleErr
+ 00000BC4  E8 00000000 E      C     call WriteString
+ 00000BC9  E9 000000D8	      C     jmp  EB_End
+ 00000BCE		      C EB_HandleOk:
+ 00000BCE  66| C7 05	      C     mov   WORD PTR wHighlightAttr, COLOR_HIGHLIGHT
+	   000000D9 R
+	   00E0
+ 00000BD7  66| C7 05	      C     mov   WORD PTR wNormalAttr,    COLOR_MORSE
+	   000000DB R
+	   000A
+			      C 
+ 00000BE0  33 DB	      C     xor  ebx, ebx
+ 00000BE2  BE 00000000 R      C     mov  esi, OFFSET inputBuffer
+ 00000BE7  8B 0D 0000003D R   C     mov  ecx, inputLen
+ 00000BED		      C EB_A_Outer:
+ 00000BED  8A 06	      C     mov  al, [esi]
+ 00000BEF  46		      C     inc  esi
+ 00000BF0  3C 61	      C     cmp  al, 'a'
+ 00000BF2  7C 06	      C     jl   EB_A_Upper
+ 00000BF4  3C 7A	      C     cmp  al, 'z'
+ 00000BF6  7F 02	      C     jg   EB_A_Upper
+ 00000BF8  2C 20	      C     sub  al, 32
+ 00000BFA		      C EB_A_Upper:
+ 00000BFA  3C 30	      C     cmp  al, '0'
+ 00000BFC  7C 0C	      C     jl   EB_A_NotAlpha
+ 00000BFE  3C 39	      C     cmp  al, '9'
+ 00000C00  7E 31	      C     jle  EB_A_Digit
+ 00000C02  3C 41	      C     cmp  al, 'A'
+ 00000C04  7C 04	      C     jl   EB_A_NotAlpha
+ 00000C06  3C 5A	      C     cmp  al, 'Z'
+ 00000C08  7E 1A	      C     jle  EB_A_Letter
+			      C 
+ 00000C0A		      C EB_A_NotAlpha:
+ 00000C0A  3C 20	      C     cmp  al, ' '
+ 00000C0C  74 05	      C     je   EB_A_Word
+ 00000C0E  E9 0000008C	      C     jmp  EB_A_Next
+ 00000C13		      C EB_A_Word:
+ 00000C13  83 C3 03	      C     add  ebx, 3
+ 00000C16  51		      C     push ecx
+ 00000C17  B8 000000FA	      C     mov  eax, LETTER_DELAY
+ 00000C1C  E8 00000000 E      C     call Delay
+ 00000C21  59		      C     pop  ecx
+ 00000C22  EB 7B	      C     jmp  EB_A_Next
+ 00000C24		      C EB_A_Letter:
+ 00000C24  0F B6 F8	      C     movzx edi, al
+ 00000C27  83 EF 41	      C     sub   edi, 'A'
+ 00000C2A  8B 14 BD	      C     mov   edx, MorseTableAlpha[edi*4]
+	   00000669 R
+ 00000C31  EB 0D	      C     jmp   EB_A_Syms
+ 00000C33		      C EB_A_Digit:
+ 00000C33  0F B6 F8	      C     movzx edi, al
+ 00000C36  83 EF 30	      C     sub   edi, '0'
+ 00000C39  8B 14 BD	      C     mov   edx, MorseTableDigit[edi*4]
+	   000006D1 R
+ 00000C40		      C EB_A_Syms:
+ 00000C40  51		      C     push  ecx
+ 00000C41  56		      C     push  esi
+ 00000C42  8B F2	      C     mov   esi, edx
+ 00000C44		      C EB_A_Inner:
+ 00000C44  8A 06	      C     mov  al, [esi]
+ 00000C46  3C 00	      C     cmp  al, 0
+ 00000C48  74 48	      C     je   EB_A_InDone
+ 00000C4A  E8 FFFFFE49	      C     call HighlightOn
+ 00000C4F  8A 06	      C     mov  al, [esi]
+ 00000C51  3C 2E	      C     cmp  al, '.'
+ 00000C53  74 16	      C     je   EB_A_Dot
+ 00000C55  E8 FFFFFDC7	      C     call BlinkOn
+ 00000C5A  B8 00000190	      C     mov  eax, DASH_DURATION
+ 00000C5F  E8 00000000 E      C     call Delay
+ 00000C64  E8 FFFFFDF5	      C     call BlinkOff
+ 00000C69  EB 14	      C     jmp  EB_A_AfterPulse
+ 00000C6B		      C EB_A_Dot:
+ 00000C6B  E8 FFFFFDB1	      C     call BlinkOn
+ 00000C70  B8 00000096	      C     mov  eax, DOT_DURATION
+ 00000C75  E8 00000000 E      C     call Delay
+ 00000C7A  E8 FFFFFDDF	      C     call BlinkOff
+ 00000C7F		      C EB_A_AfterPulse:
+ 00000C7F  E8 FFFFFE3A	      C     call HighlightOff
+ 00000C84  B8 00000050	      C     mov  eax, SYMBOL_DELAY
+ 00000C89  E8 00000000 E      C     call Delay
+ 00000C8E  43		      C     inc  ebx
+ 00000C8F  46		      C     inc  esi
+ 00000C90  EB B2	      C     jmp  EB_A_Inner
+ 00000C92		      C EB_A_InDone:
+ 00000C92  43		      C     inc  ebx
+ 00000C93  B8 000000FA	      C     mov  eax, LETTER_DELAY
+ 00000C98  E8 00000000 E      C     call Delay
+ 00000C9D  5E		      C     pop  esi
+ 00000C9E  59		      C     pop  ecx
+ 00000C9F		      C EB_A_Next:
+ 00000C9F  49		      C     dec  ecx
+ 00000CA0  0F 85 FFFFFF47     C     jnz  EB_A_Outer
+ 00000CA6		      C EB_End:
+ 00000CA6  C3		      C     ret
+ 00000CA7		      C EncodeBlink ENDP
+			      C 
+ 00000CA7		      C DoEncodingBlink PROC
+ 00000CA7  E8 FFFFF3EB	      C     call DrawTitleBar
+			      C     INVOKE DrawSubHeader, OFFSET strModeBlink
+			      C     
+ 00000CB6  B6 08	      C     mov  dh, 8
+ 00000CB8  E8 FFFFF3C1	      C     call PrintSectionLine
+			      C 
+ 00000CBD  B6 0B	      C     mov  dh, 11
+ 00000CBF  B2 00	      C     mov  dl, 0
+ 00000CC1  E8 00000000 E      C     call Gotoxy
+ 00000CC6  B0 0B	      C     mov  al, COLOR_PROMPT
+ 00000CC8  E8 00000000 E      C     call SetTextColor
+ 00000CCD  BA 00000378 R      C     mov  edx, OFFSET strEnterText
+ 00000CD2  E8 00000000 E      C     call WriteString
+ 00000CD7  B0 0E	      C     mov  al, COLOR_INPUT
+ 00000CD9  E8 00000000 E      C     call SetTextColor
+ 00000CDE  BA 00000000 R      C     mov  edx, OFFSET inputBuffer
+ 00000CE3  B9 0000003C	      C     mov  ecx, MAX_INPUT_LEN
+ 00000CE8  E8 00000000 E      C     call ReadString
+ 00000CED  A3 0000003D R      C     mov  inputLen, eax
+			      C     ; --- Empty input guard ---
+ 00000CF2  83 F8 00	      C     cmp  eax, 0
+ 00000CF5  75 1C	      C     jne  EB_CheckMorse
+ 00000CF7  B6 14	      C     mov  dh, 20
+ 00000CF9  B2 00	      C     mov  dl, 0
+ 00000CFB  E8 00000000 E      C     call Gotoxy
+ 00000D00  B0 0C	      C     mov  al, COLOR_ERROR
+ 00000D02  E8 00000000 E      C     call SetTextColor
+ 00000D07  BA 0000043B R      C     mov  edx, OFFSET strNoInput
+ 00000D0C  E8 00000000 E      C     call WriteString
+ 00000D11  EB 4C	      C     jmp  EB_WaitKey
+ 00000D13		      C EB_CheckMorse:
+ 00000D13  E8 FFFFF550	      C     call CheckIfMorseInput
+ 00000D18  83 F8 01	      C     cmp  eax, 1
+ 00000D1B  75 1C	      C     jne  EB_HasInput
+ 00000D1D  B6 14	      C     mov  dh, 20
+ 00000D1F  B2 00	      C     mov  dl, 0
+ 00000D21  E8 00000000 E      C     call Gotoxy
+ 00000D26  B0 0C	      C     mov  al, COLOR_ERROR
+ 00000D28  E8 00000000 E      C     call SetTextColor
+ 00000D2D  BA 000004ED R      C     mov  edx, OFFSET strTextNotMorse
+ 00000D32  E8 00000000 E      C     call WriteString
+ 00000D37  EB 26	      C     jmp  EB_WaitKey
+ 00000D39		      C EB_HasInput:
+			      C 
+ 00000D39  B6 0D	      C     mov  dh, 13
+ 00000D3B  E8 FFFFF33E	      C     call PrintSectionLine
+			      C 
+ 00000D40  B6 0F	      C     mov  dh, 15
+ 00000D42  B2 00	      C     mov  dl, 0
+ 00000D44  E8 00000000 E      C     call Gotoxy
+ 00000D49  B0 0B	      C     mov  al, COLOR_PROMPT
+ 00000D4B  E8 00000000 E      C     call SetTextColor
+ 00000D50  BA 0000038C R      C     mov  edx, OFFSET strYourMorse
+ 00000D55  E8 00000000 E      C     call WriteString
+			      C     
+ 00000D5A  E8 FFFFFD85	      C     call EncodeBlink
+			      C     
+ 00000D5F		      C EB_WaitKey:
+ 00000D5F  B6 1B	      C     mov  dh, 27
+ 00000D61  B2 00	      C     mov  dl, 0
+ 00000D63  E8 00000000 E      C     call Gotoxy
+ 00000D68  B0 08	      C     mov  al, COLOR_DIM
+ 00000D6A  E8 00000000 E      C     call SetTextColor
+ 00000D6F  BA 000003F4 R      C     mov  edx, OFFSET strPressAny
+ 00000D74  E8 00000000 E      C     call WriteString
+ 00000D79  E8 00000000 E      C     call ReadChar
+ 00000D7E  C3		      C     ret
+ 00000D7F		      C DoEncodingBlink ENDP
+			      C 
+				
+				END main
+Microsoft (R) Macro Assembler Version 6.15.8803		    05/02/26 20:19:30
+main.asm						     Symbols 2 - 1
+
+
+
+
+Structures and Unions:
+
+                N a m e                  Size
+                                         Offset      Type
+
+CONSOLE_CURSOR_INFO  . . . . . .	 00000005
+  dwSize . . . . . . . . . . . .	 00000000	 DWord
+  bVisible . . . . . . . . . . .	 00000004	 Byte
+CONSOLE_SCREEN_BUFFER_INFO . . .	 00000016
+  dwSize . . . . . . . . . . . .	 00000000	 DWord
+  dwCursorPos  . . . . . . . . .	 00000004	 DWord
+  wAttributes  . . . . . . . . .	 00000008	 Word
+  srWindow . . . . . . . . . . .	 0000000A	 QWord
+  maxWinSize . . . . . . . . . .	 00000012	 DWord
+COORD  . . . . . . . . . . . . .	 00000004
+  X  . . . . . . . . . . . . . .	 00000000	 Word
+  Y  . . . . . . . . . . . . . .	 00000002	 Word
+FILETIME . . . . . . . . . . . .	 00000008
+  loDateTime . . . . . . . . . .	 00000000	 DWord
+  hiDateTime . . . . . . . . . .	 00000004	 DWord
+SMALL_RECT . . . . . . . . . . .	 00000008
+  Left . . . . . . . . . . . . .	 00000000	 Word
+  Top  . . . . . . . . . . . . .	 00000002	 Word
+  Right  . . . . . . . . . . . .	 00000004	 Word
+  Bottom . . . . . . . . . . . .	 00000006	 Word
+SYSTEMTIME . . . . . . . . . . .	 00000010
+  wYear  . . . . . . . . . . . .	 00000000	 Word
+  wMonth . . . . . . . . . . . .	 00000002	 Word
+  wDayOfWeek . . . . . . . . . .	 00000004	 Word
+  wDay . . . . . . . . . . . . .	 00000006	 Word
+  wHour  . . . . . . . . . . . .	 00000008	 Word
+  wMinute  . . . . . . . . . . .	 0000000A	 Word
+  wSecond  . . . . . . . . . . .	 0000000C	 Word
+  wMilliseconds  . . . . . . . .	 0000000E	 Word
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+FLAT . . . . . . . . . . . . . .	GROUP
+STACK  . . . . . . . . . . . . .	32 Bit	 00001000 DWord	  Stack	  'STACK'	 
+_BSS . . . . . . . . . . . . . .	32 Bit	 000000DD DWord	  Public  'BSS'  
+_DATA  . . . . . . . . . . . . .	32 Bit	 00000800 DWord	  Public  'DATA'	
+_TEXT  . . . . . . . . . . . . .	32 Bit	 00000D7F DWord	  Public  'CODE'	
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+AllocConsole . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+BeepThreadProc . . . . . . . . .	P Near	 00000371 _TEXT	Length= 0000001A Public STDCALL
+  lpParam  . . . . . . . . . . .	DWord	 bp + 00000008
+Beep . . . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+BlinkOff . . . . . . . . . . . .	P Near	 00000A5E _TEXT	Length= 0000003A Public STDCALL
+  row  . . . . . . . . . . . . .	DWord	 bp - 00000004
+  BOFF_Loop  . . . . . . . . . .	L Near	 00000A6B _TEXT	
+BlinkOn  . . . . . . . . . . . .	P Near	 00000A21 _TEXT	Length= 0000003D Public STDCALL
+  row  . . . . . . . . . . . . .	DWord	 bp - 00000004
+  BON_Loop . . . . . . . . . . .	L Near	 00000A2E _TEXT	
+CheckIfMorseInput  . . . . . . .	P Near	 00000268 _TEXT	Length= 00000046 Public STDCALL
+  CMI_Loop . . . . . . . . . . .	L Near	 00000280 _TEXT	
+  CMI_IsMorseChar  . . . . . . .	L Near	 00000294 _TEXT	
+  CMI_Next . . . . . . . . . . .	L Near	 00000295 _TEXT	
+  CMI_False  . . . . . . . . . .	L Near	 0000029E _TEXT	
+  CMI_True . . . . . . . . . . .	L Near	 000002A5 _TEXT	
+  CMI_End  . . . . . . . . . . .	L Near	 000002AA _TEXT	
+CheckIfTextInput . . . . . . . .	P Near	 000002AE _TEXT	Length= 00000050 Public STDCALL
+  CTI_Loop . . . . . . . . . . .	L Near	 000002C6 _TEXT	
+  CTI_CheckDigit . . . . . . . .	L Near	 000002DA _TEXT	
+  CTI_IsAlphaNum . . . . . . . .	L Near	 000002E4 _TEXT	
+  CTI_Next . . . . . . . . . . .	L Near	 000002E5 _TEXT	
+  CTI_False  . . . . . . . . . .	L Near	 000002EE _TEXT	
+  CTI_True . . . . . . . . . . .	L Near	 000002F5 _TEXT	
+  CTI_End  . . . . . . . . . . .	L Near	 000002FA _TEXT	
+ClearLowerDisplay  . . . . . . .	P Near	 0000023D _TEXT	Length= 0000002B Public STDCALL
+  CLD_Loop . . . . . . . . . . .	L Near	 00000247 _TEXT	
+CloseHandle  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+ClrScr . . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+CompareStrings . . . . . . . . .	P Near	 00000816 _TEXT	Length= 0000001F Public STDCALL
+  CS_Loop  . . . . . . . . . . .	L Near	 00000819 _TEXT	
+  CS_NotEqual  . . . . . . . . .	L Near	 00000829 _TEXT	
+  CS_Equal . . . . . . . . . . .	L Near	 0000082F _TEXT	
+CreateFileA  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+CreateThread . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Crlf . . . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Delay  . . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+DoDecoding . . . . . . . . . . .	P Near	 00000835 _TEXT	Length= 000001EC Public STDCALL
+  Dec_CheckText  . . . . . . . .	L Near	 000008A4 _TEXT	
+  Dec_HasInput . . . . . . . . .	L Near	 000008CD _TEXT	
+  ParseLoop  . . . . . . . . . .	L Near	 00000915 _TEXT	
+  ExtractToken . . . . . . . . .	L Near	 00000924 _TEXT	
+  MT_StoreChar . . . . . . . . .	L Near	 0000093F _TEXT	
+  SpaceFound . . . . . . . . . .	L Near	 00000955 _TEXT	
+  EndToken . . . . . . . . . . .	L Near	 00000962 _TEXT	
+  FindLookup . . . . . . . . . .	L Near	 0000096B _TEXT	
+  CheckAlpha . . . . . . . . . .	L Near	 0000097F _TEXT	
+  AlphaLoop  . . . . . . . . . .	L Near	 00000984 _TEXT	
+  DigitLoop  . . . . . . . . . .	L Near	 000009A6 _TEXT	
+  FoundAlpha . . . . . . . . . .	L Near	 000009CD _TEXT	
+  FoundDigit . . . . . . . . . .	L Near	 000009DA _TEXT	
+  PrintResult  . . . . . . . . .	L Near	 000009E7 _TEXT	
+  DecodeEnd  . . . . . . . . . .	L Near	 00000A01 _TEXT	
+  Dec_WaitKey  . . . . . . . . .	L Near	 00000A01 _TEXT	
+DoEncodingBlink  . . . . . . . .	P Near	 00000CA7 _TEXT	Length= 000000D8 Public STDCALL
+  EB_CheckMorse  . . . . . . . .	L Near	 00000D13 _TEXT	
+  EB_HasInput  . . . . . . . . .	L Near	 00000D39 _TEXT	
+  EB_WaitKey . . . . . . . . . .	L Near	 00000D5F _TEXT	
+DoEncodingSound  . . . . . . . .	P Near	 00000577 _TEXT	Length= 000000D8 Public STDCALL
+  ES_CheckMorse  . . . . . . . .	L Near	 000005E3 _TEXT	
+  ES_HasInput  . . . . . . . . .	L Near	 00000609 _TEXT	
+  ES_WaitKey . . . . . . . . . .	L Near	 0000062F _TEXT	
+DoEncodingVisual . . . . . . . .	P Near	 0000073A _TEXT	Length= 000000DC Public STDCALL
+  DEV_CheckMorse . . . . . . . .	L Near	 000007AA _TEXT	
+  DEV_HasInput . . . . . . . . .	L Near	 000007D0 _TEXT	
+  DEV_WaitKey  . . . . . . . . .	L Near	 000007F6 _TEXT	
+DrawMainMenu . . . . . . . . . .	P Near	 00000130 _TEXT	Length= 0000010D Public STDCALL
+DrawSubHeader  . . . . . . . . .	P Near	 000000FE _TEXT	Length= 00000032 Public STDCALL
+  pMode  . . . . . . . . . . . .	DWord	 bp + 00000008
+DrawTitleBar . . . . . . . . . .	P Near	 00000097 _TEXT	Length= 00000067 Public STDCALL
+DumpMem  . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+DumpRegs . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+EncodeBlink  . . . . . . . . . .	P Near	 00000AE4 _TEXT	Length= 000001C3 Public STDCALL
+  EB_C_Outer . . . . . . . . . .	L Near	 00000B08 _TEXT	
+  EB_C_Upper . . . . . . . . . .	L Near	 00000B15 _TEXT	
+  EB_C_NotAlpha  . . . . . . . .	L Near	 00000B25 _TEXT	
+  EB_C_Word  . . . . . . . . . .	L Near	 00000B2B _TEXT	
+  EB_C_Letter  . . . . . . . . .	L Near	 00000B37 _TEXT	
+  EB_C_Digit . . . . . . . . . .	L Near	 00000B46 _TEXT	
+  EB_C_Syms  . . . . . . . . . .	L Near	 00000B53 _TEXT	
+  EB_C_Inner . . . . . . . . . .	L Near	 00000B57 _TEXT	
+  EB_C_InDone  . . . . . . . . .	L Near	 00000B65 _TEXT	
+  EB_C_Next  . . . . . . . . . .	L Near	 00000B71 _TEXT	
+  EB_HandleError . . . . . . . .	L Near	 00000BAF _TEXT	
+  EB_HandleOk  . . . . . . . . .	L Near	 00000BCE _TEXT	
+  EB_A_Outer . . . . . . . . . .	L Near	 00000BED _TEXT	
+  EB_A_Upper . . . . . . . . . .	L Near	 00000BFA _TEXT	
+  EB_A_NotAlpha  . . . . . . . .	L Near	 00000C0A _TEXT	
+  EB_A_Word  . . . . . . . . . .	L Near	 00000C13 _TEXT	
+  EB_A_Letter  . . . . . . . . .	L Near	 00000C24 _TEXT	
+  EB_A_Digit . . . . . . . . . .	L Near	 00000C33 _TEXT	
+  EB_A_Syms  . . . . . . . . . .	L Near	 00000C40 _TEXT	
+  EB_A_Inner . . . . . . . . . .	L Near	 00000C44 _TEXT	
+  EB_A_Dot . . . . . . . . . . .	L Near	 00000C6B _TEXT	
+  EB_A_AfterPulse  . . . . . . .	L Near	 00000C7F _TEXT	
+  EB_A_InDone  . . . . . . . . .	L Near	 00000C92 _TEXT	
+  EB_A_Next  . . . . . . . . . .	L Near	 00000C9F _TEXT	
+  EB_End . . . . . . . . . . . .	L Near	 00000CA6 _TEXT	
+EncodeSound  . . . . . . . . . .	P Near	 0000038B _TEXT	Length= 000001EC Public STDCALL
+  ES_C_Outer . . . . . . . . . .	L Near	 000003AF _TEXT	
+  ES_C_Upper . . . . . . . . . .	L Near	 000003BC _TEXT	
+  ES_C_NotAlpha  . . . . . . . .	L Near	 000003CC _TEXT	
+  ES_C_Word  . . . . . . . . . .	L Near	 000003D2 _TEXT	
+  ES_C_Letter  . . . . . . . . .	L Near	 000003DE _TEXT	
+  ES_C_Digit . . . . . . . . . .	L Near	 000003ED _TEXT	
+  ES_C_Syms  . . . . . . . . . .	L Near	 000003FA _TEXT	
+  ES_C_Inner . . . . . . . . . .	L Near	 000003FE _TEXT	
+  ES_C_InDone  . . . . . . . . .	L Near	 0000040C _TEXT	
+  ES_C_Next  . . . . . . . . . .	L Near	 00000418 _TEXT	
+  ES_A_Outer . . . . . . . . . .	L Near	 0000044C _TEXT	
+  ES_A_Upper . . . . . . . . . .	L Near	 00000459 _TEXT	
+  ES_A_NotAlpha  . . . . . . . .	L Near	 00000469 _TEXT	
+  ES_A_Word  . . . . . . . . . .	L Near	 00000472 _TEXT	
+  ES_A_Letter  . . . . . . . . .	L Near	 00000484 _TEXT	
+  ES_A_Digit . . . . . . . . . .	L Near	 00000493 _TEXT	
+  ES_A_Syms  . . . . . . . . . .	L Near	 000004A0 _TEXT	
+  ES_A_Inner . . . . . . . . . .	L Near	 000004A4 _TEXT	
+  ES_A_Dot . . . . . . . . . . .	L Near	 000004DF _TEXT	
+  ES_A_Launch  . . . . . . . . .	L Near	 000004F3 _TEXT	
+  ES_A_ThreadDone  . . . . . . .	L Near	 00000551 _TEXT	
+  ES_A_InDone  . . . . . . . . .	L Near	 00000562 _TEXT	
+  ES_A_Next  . . . . . . . . . .	L Near	 0000056F _TEXT	
+  ES_End . . . . . . . . . . . .	L Near	 00000576 _TEXT	
+EncodeVisual . . . . . . . . . .	P Near	 0000064F _TEXT	Length= 000000EB Public STDCALL
+  EV_Outer . . . . . . . . . . .	L Near	 00000673 _TEXT	
+  EV_CheckUpper  . . . . . . . .	L Near	 00000680 _TEXT	
+  EV_NotAlpha  . . . . . . . . .	L Near	 00000690 _TEXT	
+  EV_WordSep . . . . . . . . . .	L Near	 000006D8 _TEXT	
+  EV_IsLetter  . . . . . . . . .	L Near	 000006E4 _TEXT	
+  EV_IsDigit . . . . . . . . . .	L Near	 000006F3 _TEXT	
+  EV_Symbols . . . . . . . . . .	L Near	 00000700 _TEXT	
+  EV_Inner . . . . . . . . . . .	L Near	 00000704 _TEXT	
+  EV_InnerDone . . . . . . . . .	L Near	 0000071C _TEXT	
+  EV_Next  . . . . . . . . . . .	L Near	 00000732 _TEXT	
+  EV_End . . . . . . . . . . . .	L Near	 00000739 _TEXT	
+ExitProcess  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+FillConsoleOutputAttribute . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+FlushConsoleInputBuffer  . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+FreeConsole  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetCommandTail . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetConsoleCP . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetConsoleCursorInfo . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetConsoleMode . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetConsoleScreenBufferInfo . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetDateTime  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetLocalTime . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetMseconds  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetNumberOfConsoleInputEvents  .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetProcAddress . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetStdHandle . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetSystemTime  . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+GetTickCount . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Gotoxy . . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+HighlightOff . . . . . . . . . .	P Near	 00000ABE _TEXT	Length= 00000026 Public STDCALL
+HighlightOn  . . . . . . . . . .	P Near	 00000A98 _TEXT	Length= 00000026 Public STDCALL
+IsDigit  . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+LoadLibraryA . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+PeekConsoleInputA  . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+PrintBotBorder . . . . . . . . .	P Near	 00000065 _TEXT	Length= 00000019 Public STDCALL
+PrintDivider . . . . . . . . . .	P Near	 0000004C _TEXT	Length= 00000019 Public STDCALL
+PrintRightWall . . . . . . . . .	P Near	 00000016 _TEXT	Length= 0000001D Public STDCALL
+PrintSectionLine . . . . . . . .	P Near	 0000007E _TEXT	Length= 00000019 Public STDCALL
+PrintTopBorder . . . . . . . . .	P Near	 00000033 _TEXT	Length= 00000019 Public STDCALL
+PrintWall  . . . . . . . . . . .	P Near	 00000000 _TEXT	Length= 00000016 Public STDCALL
+Random32 . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+RandomRange  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Randomize  . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+ReadChar . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+ReadConsoleA . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+ReadConsoleInputA  . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+ReadFile . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+ReadHex  . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+ReadInt  . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+ReadString . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetConsoleCursorInfo . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetConsoleCursorPosition . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetConsoleMode . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetConsoleScreenBufferSize . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetConsoleTextAttribute  . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetConsoleTitleA . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetConsoleWindowInfo . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetFilePointer . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SetTextColor . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Sleep  . . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Str_compare  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Str_copy . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Str_length . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Str_trim . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+Str_ucase  . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+SystemTimeToFileTime . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WaitForSingleObject  . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WaitMsg  . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteBin . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteChar  . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteConsoleA  . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteConsoleOutputAttribute  . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteConsoleOutputCharacterA . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteDec . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteFile  . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteHex . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteInt . . . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+WriteString  . . . . . . . . . .	P Near	 00000000 FLAT	Length= 00000000 External STDCALL
+main . . . . . . . . . . . . . .	P Near	 000002FE _TEXT	Length= 00000073 Public STDCALL
+  MenuLoop . . . . . . . . . . .	L Near	 000002FE _TEXT	
+  Main_DoVisual  . . . . . . . .	L Near	 00000342 _TEXT	
+  Main_DoSound . . . . . . . . .	L Near	 00000349 _TEXT	
+  Main_DoDecode  . . . . . . . .	L Near	 00000350 _TEXT	
+  Main_DoBlink . . . . . . . . .	L Near	 00000357 _TEXT	
+  Main_ExitProg  . . . . . . . .	L Near	 0000035E _TEXT	
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+@CodeSize  . . . . . . . . . . .	Number	 00000000h   
+@DataSize  . . . . . . . . . . .	Number	 00000000h   
+@Interface . . . . . . . . . . .	Number	 00000003h   
+@Model . . . . . . . . . . . . .	Number	 00000007h   
+@code  . . . . . . . . . . . . .	Text   	 _TEXT
+@data  . . . . . . . . . . . . .	Text   	 FLAT
+@fardata?  . . . . . . . . . . .	Text   	 FLAT
+@fardata . . . . . . . . . . . .	Text   	 FLAT
+@stack . . . . . . . . . . . . .	Text   	 FLAT
+AUDIO_PRE_DELAY  . . . . . . . .	Number	 00000000h   
+BLINK_COLOR_OFF  . . . . . . . .	Number	 00000000h   
+BLINK_COLOR_ON . . . . . . . . .	Number	 000000FFh   
+BLINK_HEIGHT . . . . . . . . . .	Number	 00000005h   
+BLINK_WIDTH  . . . . . . . . . .	Number	 0000003Ch   
+BLINK_X  . . . . . . . . . . . .	Number	 0000000Ah   
+BLINK_Y  . . . . . . . . . . . .	Number	 00000014h   
+BOX_LEFT . . . . . . . . . . . .	Number	 00000002h   
+BOX_RIGHT  . . . . . . . . . . .	Number	 0000004Dh   
+BOX_WIDTH  . . . . . . . . . . .	Number	 0000004Ch   
+COLOR_BORDER . . . . . . . . . .	Number	 00000009h   
+COLOR_DIM  . . . . . . . . . . .	Number	 00000008h   
+COLOR_ERROR  . . . . . . . . . .	Number	 0000000Ch   
+COLOR_HIGHLIGHT  . . . . . . . .	Number	 000000E0h   
+COLOR_INPUT  . . . . . . . . . .	Number	 0000000Eh   
+COLOR_MENU_KEY . . . . . . . . .	Number	 0000000Fh   
+COLOR_MORSE  . . . . . . . . . .	Number	 0000000Ah   
+COLOR_NORMAL . . . . . . . . . .	Number	 00000007h   
+COLOR_PROMPT . . . . . . . . . .	Number	 0000000Bh   
+COLOR_STATUS . . . . . . . . . .	Number	 00000002h   
+COLOR_TITLE_ACC  . . . . . . . .	Number	 0000000Bh   
+COLOR_TITLE  . . . . . . . . . .	Number	 00000009h   
+CREATE_ALWAYS  . . . . . . . . .	Number	 00000002h   
+CREATE_NEW . . . . . . . . . . .	Number	 00000001h   
+CreateFile . . . . . . . . . . .	Text   	 CreateFileA
+DASH_DURATION  . . . . . . . . .	Number	 00000190h   
+DOT_DURATION . . . . . . . . . .	Number	 00000096h   
+DOT_FREQ . . . . . . . . . . . .	Number	 00000320h   
+DO_NOT_SHARE . . . . . . . . . .	Number	 00000000h   
+ENABLE_ECHO_INPUT  . . . . . . .	Number	 00000004h   
+ENABLE_LINE_INPUT  . . . . . . .	Number	 00000002h   
+ENABLE_MOUSE_INPUT . . . . . . .	Number	 00000010h   
+ENABLE_PROCESSED_INPUT . . . . .	Number	 00000001h   
+ENABLE_PROCESSED_OUTPUT  . . . .	Number	 00000001h   
+ENABLE_WINDOW_INPUT  . . . . . .	Number	 00000008h   
+ENABLE_WRAP_AT_EOL_OUTPUT  . . .	Number	 00000002h   
+FALSE  . . . . . . . . . . . . .	Number	 00000000h   
+FILE_APPEND_DATA . . . . . . . .	Number	 00000004h   
+FILE_ATTRIBUTE_ARCHIVE . . . . .	Number	 00000020h   
+FILE_ATTRIBUTE_COMPRESSED  . . .	Number	 00000800h   
+FILE_ATTRIBUTE_DEVICE  . . . . .	Number	 00000040h   
+FILE_ATTRIBUTE_DIRECTORY . . . .	Number	 00000010h   
+FILE_ATTRIBUTE_ENCRYPTED . . . .	Number	 00004000h   
+FILE_ATTRIBUTE_HIDDEN  . . . . .	Number	 00000002h   
+FILE_ATTRIBUTE_NORMAL  . . . . .	Number	 00000080h   
+FILE_ATTRIBUTE_NOT_CONTENT_INDEXED .	Number	 00002000h   
+FILE_ATTRIBUTE_OFFLINE . . . . .	Number	 00001000h   
+FILE_ATTRIBUTE_READONLY  . . . .	Number	 00000001h   
+FILE_ATTRIBUTE_REPARSE_POINT . .	Number	 00000400h   
+FILE_ATTRIBUTE_SPARSE_FILE . . .	Number	 00000200h   
+FILE_ATTRIBUTE_SYSTEM  . . . . .	Number	 00000004h   
+FILE_ATTRIBUTE_TEMPORARY . . . .	Number	 00000100h   
+FILE_BEGIN . . . . . . . . . . .	Number	 00000000h   
+FILE_CURRENT . . . . . . . . . .	Number	 00000001h   
+FILE_DELETE_CHILD  . . . . . . .	Number	 00000040h   
+FILE_END . . . . . . . . . . . .	Number	 00000002h   
+FILE_READ_DATA . . . . . . . . .	Number	 00000001h   
+FILE_SHARE_DELETE  . . . . . . .	Number	 00000004h   
+FILE_SHARE_READ  . . . . . . . .	Number	 00000001h   
+FILE_SHARE_WRITE . . . . . . . .	Number	 00000002h   
+FILE_WRITE_DATA  . . . . . . . .	Number	 00000002h   
+FOCUS_EVENT  . . . . . . . . . .	Number	 00000010h   
+GENERIC_ALL  . . . . . . . . . .	Number	 10000000h   
+GENERIC_EXECUTE  . . . . . . . .	Number	 20000000h   
+GENERIC_READ . . . . . . . . . .	Number	 -80000000h   
+GENERIC_WRITE  . . . . . . . . .	Number	 40000000h   
+HIGHLIGHT_DURATION . . . . . . .	Number	 00000258h   
+INVALID_HANDLE_VALUE . . . . . .	Number	 -00000001h   
+KEY_EVENT  . . . . . . . . . . .	Number	 00000001h   
+LETTER_DELAY . . . . . . . . . .	Number	 000000FAh   
+MAX_INPUT_LEN  . . . . . . . . .	Number	 0000003Ch   
+MENU_EVENT . . . . . . . . . . .	Number	 00000008h   
+MORSE_ROW  . . . . . . . . . . .	Number	 00000010h   
+MOUSE_EVENT  . . . . . . . . . .	Number	 00000002h   
+Morse0 . . . . . . . . . . . . .	Byte	 0000062D _DATA	
+Morse1 . . . . . . . . . . . . .	Byte	 00000633 _DATA	
+Morse2 . . . . . . . . . . . . .	Byte	 00000639 _DATA	
+Morse3 . . . . . . . . . . . . .	Byte	 0000063F _DATA	
+Morse4 . . . . . . . . . . . . .	Byte	 00000645 _DATA	
+Morse5 . . . . . . . . . . . . .	Byte	 0000064B _DATA	
+Morse6 . . . . . . . . . . . . .	Byte	 00000651 _DATA	
+Morse7 . . . . . . . . . . . . .	Byte	 00000657 _DATA	
+Morse8 . . . . . . . . . . . . .	Byte	 0000065D _DATA	
+Morse9 . . . . . . . . . . . . .	Byte	 00000663 _DATA	
+MorseA . . . . . . . . . . . . .	Byte	 000005C1 _DATA	
+MorseB . . . . . . . . . . . . .	Byte	 000005C4 _DATA	
+MorseC . . . . . . . . . . . . .	Byte	 000005C9 _DATA	
+MorseD . . . . . . . . . . . . .	Byte	 000005CE _DATA	
+MorseE . . . . . . . . . . . . .	Byte	 000005D2 _DATA	
+MorseF . . . . . . . . . . . . .	Byte	 000005D4 _DATA	
+MorseG . . . . . . . . . . . . .	Byte	 000005D9 _DATA	
+MorseH . . . . . . . . . . . . .	Byte	 000005DD _DATA	
+MorseI . . . . . . . . . . . . .	Byte	 000005E2 _DATA	
+MorseJ . . . . . . . . . . . . .	Byte	 000005E5 _DATA	
+MorseK . . . . . . . . . . . . .	Byte	 000005EA _DATA	
+MorseL . . . . . . . . . . . . .	Byte	 000005EE _DATA	
+MorseM . . . . . . . . . . . . .	Byte	 000005F3 _DATA	
+MorseN . . . . . . . . . . . . .	Byte	 000005F6 _DATA	
+MorseO . . . . . . . . . . . . .	Byte	 000005F9 _DATA	
+MorseP . . . . . . . . . . . . .	Byte	 000005FD _DATA	
+MorseQ . . . . . . . . . . . . .	Byte	 00000602 _DATA	
+MorseR . . . . . . . . . . . . .	Byte	 00000607 _DATA	
+MorseS . . . . . . . . . . . . .	Byte	 0000060B _DATA	
+MorseTableAlpha  . . . . . . . .	DWord	 00000669 _DATA	
+MorseTableDigit  . . . . . . . .	DWord	 000006D1 _DATA	
+MorseT . . . . . . . . . . . . .	Byte	 0000060F _DATA	
+MorseU . . . . . . . . . . . . .	Byte	 00000611 _DATA	
+MorseV . . . . . . . . . . . . .	Byte	 00000615 _DATA	
+MorseW . . . . . . . . . . . . .	Byte	 0000061A _DATA	
+MorseX . . . . . . . . . . . . .	Byte	 0000061E _DATA	
+MorseY . . . . . . . . . . . . .	Byte	 00000623 _DATA	
+MorseZ . . . . . . . . . . . . .	Byte	 00000628 _DATA	
+NULL . . . . . . . . . . . . . .	Number	 00000000h   
+OPEN_ALWAYS  . . . . . . . . . .	Number	 00000004h   
+OPEN_EXISTING  . . . . . . . . .	Number	 00000003h   
+PeekConsoleInput . . . . . . . .	Text   	 PeekConsoleInputA
+ReadConsoleInput . . . . . . . .	Text   	 ReadConsoleInputA
+ReadConsole  . . . . . . . . . .	Text   	 ReadConsoleA
+STD_INPUT_HANDLE . . . . . . . .	Number	 -0000000Ah   
+STD_OUTPUT_HANDLE_VAL  . . . . .	Number	 FFFFFFF5h   
+STD_OUTPUT_HANDLE  . . . . . . .	Number	 -0000000Bh   
+SYMBOL_DELAY . . . . . . . . . .	Number	 00000050h   
+SetConsoleTitle  . . . . . . . .	Text   	 SetConsoleTitleA
+TRUE . . . . . . . . . . . . . .	Number	 00000001h   
+TRUNCATE_EXISTING  . . . . . . .	Number	 00000005h   
+WINDOW_BUFFER_SIZE_EVENT . . . .	Number	 00000004h   
+WriteConsoleOutputCharacter  . .	Text   	 WriteConsoleOutputCharacterA
+WriteConsole . . . . . . . . . .	Text   	 WriteConsoleA
+beepDur  . . . . . . . . . . . .	DWord	 00000045 _BSS	
+beepFreq . . . . . . . . . . . .	DWord	 00000041 _BSS	
+black  . . . . . . . . . . . . .	Number	 00000000h   
+blue . . . . . . . . . . . . . .	Number	 00000001h   
+brown  . . . . . . . . . . . . .	Number	 00000006h   
+cyan . . . . . . . . . . . . . .	Number	 00000003h   
+decodedBuffer  . . . . . . . . .	Byte	 00000069 _BSS	
+dwAttrsWritten . . . . . . . . .	DWord	 000000D5 _BSS	
+dwCellsWritten . . . . . . . . .	DWord	 000000D1 _BSS	
+dwThreadId . . . . . . . . . . .	DWord	 0000004D _BSS	
+exit . . . . . . . . . . . . . .	Text   	 INVOKE ExitProcess,0
+gray . . . . . . . . . . . . . .	Number	 00000008h   
+green  . . . . . . . . . . . . .	Number	 00000002h   
+hBeepThread  . . . . . . . . . .	DWord	 00000049 _BSS	
+hMainConsole . . . . . . . . . .	DWord	 000000CD _BSS	
+inputBuffer  . . . . . . . . . .	Byte	 00000000 _BSS	
+inputLen . . . . . . . . . . . .	DWord	 0000003D _BSS	
+lightBlue  . . . . . . . . . . .	Number	 00000009h   
+lightCyan  . . . . . . . . . . .	Number	 0000000Bh   
+lightGray  . . . . . . . . . . .	Number	 00000007h   
+lightGreen . . . . . . . . . . .	Number	 0000000Ah   
+lightMagenta . . . . . . . . . .	Number	 0000000Dh   
+lightRed . . . . . . . . . . . .	Number	 0000000Ch   
+magenta  . . . . . . . . . . . .	Number	 00000005h   
+red  . . . . . . . . . . . . . .	Number	 00000004h   
+strBlankLine . . . . . . . . . .	Byte	 00000578 _DATA	
+strBlinkingLabel . . . . . . . .	Byte	 000007D2 _DATA	
+strBotBorder . . . . . . . . . .	Byte	 0000009A _DATA	
+strDash  . . . . . . . . . . . .	Byte	 000005B9 _DATA	
+strDivider . . . . . . . . . . .	Byte	 0000004D _DATA	
+strDot . . . . . . . . . . . . .	Byte	 000005B7 _DATA	
+strEmptyMorse  . . . . . . . . .	Byte	 00000478 _DATA	
+strEnterMorse  . . . . . . . . .	Byte	 000003CC _DATA	
+strEnterText . . . . . . . . . .	Byte	 00000378 _DATA	
+strHandleErr . . . . . . . . . .	Byte	 000004B5 _DATA	
+strInvalidChar . . . . . . . . .	Byte	 0000041B _DATA	
+strInvalid . . . . . . . . . . .	Byte	 00000356 _DATA	
+strLetterGap . . . . . . . . . .	Byte	 000005BB _DATA	
+strMenu1 . . . . . . . . . . . .	Byte	 000001CE _DATA	
+strMenu2 . . . . . . . . . . . .	Byte	 00000215 _DATA	
+strMenuBlink . . . . . . . . . .	Byte	 000002A3 _DATA	
+strMenuDecode  . . . . . . . . .	Byte	 0000025C _DATA	
+strMenuExit  . . . . . . . . . .	Byte	 000002EB _DATA	
+strMenuPrompt  . . . . . . . . .	Byte	 00000332 _DATA	
+strModeBlink . . . . . . . . . .	Byte	 00000796 _DATA	
+strModeDecode  . . . . . . . . .	Byte	 0000075E _DATA	
+strModeSound . . . . . . . . . .	Byte	 000006F9 _DATA	
+strModeVis . . . . . . . . . . .	Byte	 0000072B _DATA	
+strMorseNotText  . . . . . . . .	Byte	 00000533 _DATA	
+strNoInput . . . . . . . . . . .	Byte	 0000043B _DATA	
+strPlayingLabel  . . . . . . . .	Byte	 000003A0 _DATA	
+strPressAny  . . . . . . . . . .	Byte	 000003F4 _DATA	
+strSectionLine . . . . . . . . .	Byte	 000000E9 _DATA	
+strSpace . . . . . . . . . . . .	Byte	 000005B5 _DATA	
+strTextNotMorse  . . . . . . . .	Byte	 000004ED _DATA	
+strTitle1  . . . . . . . . . . .	Byte	 00000138 _DATA	
+strTitle2  . . . . . . . . . . .	Byte	 0000017C _DATA	
+strTopBorder . . . . . . . . . .	Byte	 00000000 _DATA	
+strWall  . . . . . . . . . . . .	Byte	 000000E7 _DATA	
+strWordSep . . . . . . . . . . .	Byte	 000005BD _DATA	
+strYourMorse . . . . . . . . . .	Byte	 0000038C _DATA	
+strYourText  . . . . . . . . . .	Byte	 000003E0 _DATA	
+tokenBuffer  . . . . . . . . . .	Byte	 00000051 _BSS	
+tokenLen . . . . . . . . . . . .	DWord	 00000065 _BSS	
+wHighlightAttr . . . . . . . . .	Word	 000000D9 _BSS	
+wNormalAttr  . . . . . . . . . .	Word	 000000DB _BSS	
+white  . . . . . . . . . . . . .	Number	 0000000Fh   
+yellow . . . . . . . . . . . . .	Number	 0000000Eh   
+
+	   0 Warnings
+	   0 Errors
